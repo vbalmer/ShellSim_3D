@@ -1,0 +1,8 @@
+*.pkl
+*.png
+*.npy
+*.pt
+*.svg
+*.pdf
+*.json
+*.pyc
