@@ -19,7 +19,7 @@ def get_constant_sampling_params(sample_2d:bool) -> tuple:
     collect constant parameters for sampling (material parameters, ranges, ...)
     
     Args:
-        dim         (str):    2D or 3D
+        sample_2d   (bool):    True for sampling in 2D
 
     Returns: 
         constants   (dict):    Containing relevant input parameters for sampling
@@ -28,7 +28,7 @@ def get_constant_sampling_params(sample_2d:bool) -> tuple:
 
     c = {
         'n_samples_2D': 1e6, 
-        'n_samples_3D': 1e8,
+        'n_samples_3D': 4e9,
 
         'min': [-3e-3]*2 + [-4e-3],
         'max': [5e-3]*2  + [4e-3],
@@ -55,7 +55,7 @@ def get_constant_sampling_params(sample_2d:bool) -> tuple:
     if not sample_2d:
         c.update(c_3D)
 
-
+    # TODO: select which type of concrete and only calculate with one value in mat_dict from then on.
     dict_CC.update({'fsy': c["fsy"], 'fsu': c["fsu"], 'Es': c["Es"], 'Esh': c["Esh"], 'D': c["D"], 'Dmax': c["Dmax"], 's': c["s"]})
     mat_dict = dict_CC
 
@@ -88,6 +88,15 @@ def sample_eps(sampler:str, constants: dict) -> np.array:
         par_names = ['eps_x', 'eps_y', 'eps_xy', 'chi_x', 'chi_y', 'chi_xy']
         uniform_sampler = samplers(par_names, constants['min'], constants['max'], samples= constants['n_samples_3D'])
         data = uniform_sampler.uniform_multi()
+        print(f'Sampled {int(constants["n_samples_3D"]/1e9)}*1e9 values for 3D-epsilon')
+        t_elapsed = time.perf_counter() - t0
+        print(f'3D Sampling done in {t_elapsed/60:.2f}min')
+    
+    elif sampler == 'uniform_3D_grouped':
+        t0 = time.perf_counter()
+        par_names = ['eps_x', 'eps_y', 'eps_xy', 'chi_x', 'chi_y', 'chi_xy']
+        uniform_sampler = samplers(par_names, constants['min'], constants['max'], samples= constants['n_samples_3D'])
+        data = uniform_sampler.uniform_multi_grouped()
         print(f'Sampled {int(constants["n_samples_3D"]/1e9)}*1e9 values for 3D-epsilon')
         t_elapsed = time.perf_counter() - t0
         print(f'3D Sampling done in {t_elapsed/60:.2f}min')
@@ -161,6 +170,38 @@ class samplers:
         grids = np.meshgrid(*axes, indexing='ij')
         points = np.column_stack([g.ravel() for g in grids])
         
+        return points
+
+    def uniform_multi_grouped(self, group_size=3):
+        n_dims = len(self.min)
+        n_groups = n_dims // group_size
+        n_i = int(np.round((self.samples)**(1/n_dims), 0))
+
+        group_grids = []
+        for g in range(n_groups):
+            start0 = g * group_size
+            end0 = start0 + group_size
+            axes = [np.linspace(self.min[i], self.max[i], n_i) for i in range(start0, end0)]
+            grids = np.meshgrid(*axes, indexing='ij')
+            group_points = np.column_stack([gr.ravel() for gr in grids])  # (40^3, 3)
+            group_grids.append(group_points)
+
+        # Efficient cartesian product via repeat/tile instead of meshgrid on indices
+        g0, g1 = group_grids[0], group_grids[1]
+        n0, n1 = len(g0), len(g1)
+
+        print(f'g0 shape: {g0.shape}')  # should be (40^3, 3) = (64000, 3)
+        print(f'g1 shape: {g1.shape}')  # should be (40^3, 3) = (64000, 3)
+        print(f'g1 unique values per dim:')
+        for j in range(3):
+            print(f'  dim {j}: {len(np.unique(g1[:,j]))} unique values')
+
+        points = np.empty((n0 * n1, n_dims), dtype=np.float32)
+        points[:, :group_size] = np.repeat(g0, n1, axis=0)   # repeat each row of g0 n1 times
+        points[:, group_size:] = np.tile(g1, (n0, 1))         # tile g1 n0 times
+
+        print(f'After tile, unique values in last dim: {len(np.unique(points[:, -1]))}')
+
         return points
 
 
@@ -351,13 +392,13 @@ def save_3D_eps(eps_g:np.array, save_dir):
     t2 = time.perf_counter()
     with h5py.File(os.path.join(save_dir,f'output_eps_g.h5'), 'w') as f:
         f.create_dataset('eps_g',     data = eps_g,     dtype='float32')
-    print(f'time save_eps: {time.perf_counter()-t2:.2f}s')
+    print(f'time save_eps: {(time.perf_counter()-t2)/60:.2f}min')
 
 
 
 ########################################## Visualising ##########################################
 
-def plot_3D_eps(save_data_path):
+def plot_3D_eps(save_data_path, n_every: int = int(1e3)):
     """
     visualise sampled strains
 
@@ -366,37 +407,45 @@ def plot_3D_eps(save_data_path):
 
     """
     
-
-    fig = plt.figure(figsize=(14, 7))
-    ax = fig.add_subplot(111, projection='3d')
     
+    fig = plt.figure(figsize=(14, 7))
+    
+    t0 = time.perf_counter()
+    data = read_h5_file(save_data_path, n_every)
+    print(f'time reading file: {(time.perf_counter()-t0)/60:.2f}min')
 
     for i in range(2):
-        x, y, z = read_h5_file(save_data_path, i)
-        x = x[::1000]
-        y = y[::1000]
-        z = z[::1000]
-        print(f'Plotting {len(x)} points')
+        t1 = time.perf_counter()
+        x = data[:,i*3]
+        y = data[:,i*3+1]
+        z = data[:,i*3+2]
+        print(f'Plotting {len(x)/1e6}*1e6/{len(x)/(1e6)*n_every}*1e6 points')
         
         ax = fig.add_subplot(1, 2, i + 1, projection='3d')
         ax.scatter(x, y, z, s=2, alpha=0.5)
         figure_formatting(ax, i)
+        print(f'time plotting: {(time.perf_counter()-t1)/60:.2f}min')
 
+    t2 = time.perf_counter()
     plt.tight_layout()
     plt.savefig(os.path.join(os.getcwd(), "sampling\\plots\\scatter_eps_g.png"))
     print('Saved scatter_eps_g to sampling\\plots\\scatter_eps_g.png')
-    plt.show()
+    print(f'time saving figure: {(time.perf_counter()-t2)/60:.2f}min')
 
     return
 
 
-def read_h5_file(save_data_path, i:int) -> tuple:
+def read_h5_file(save_data_path, n_every:int) -> tuple:
     with h5py.File(save_data_path, 'r') as f:
-        x = f['eps_g'][:,i*3]
-        y = f['eps_g'][:,i*3+1]
-        z = f['eps_g'][:,i*3+2]
+        data = f['eps_g'][::n_every,:]
 
-    return x,y,z
+    # this is quite slow...
+    # with h5py.File(save_data_path, 'r') as f:
+    #     n_total = f['eps_g'].shape[0]
+    #     idx = np.sort(np.random.choice(n_total, size=n_total//n_every, replace=False))
+    #     data = f['eps_g'][idx, :]
+
+    return data
 
 
 def figure_formatting(ax, i):
