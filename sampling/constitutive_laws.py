@@ -10,90 +10,121 @@
 
 
 import numpy as np
-from defcplx import *
-from defcplx import cplx
+from defcplx_np import *
+from defcplx_np import cplx
 
 
 class ConstitutiveLaws():
-    def __init__(self, constants, mat_dict):
-        # self.E = constants['E']
-        # self.nu = constants['nu']
+    def __init__(self, e, constants, mat_dict, cm_klij = 3):
+        # General
+        self.cm_klij = cm_klij          # material type: 1 - lin.el., 3 - nonlinear RC
+        self.e = e                      # strain vector per layer, shape: (n_tot, nl, 3)
 
-
+        # Material parameters
         self.ect = mat_dict['ect']
-        
-        # constants:
+        self.Ec = mat_dict['Ec']
+        self.fct = mat_dict['fct']
+
+        self.Esx = mat_dict['Es']
+        self.Esy = mat_dict['Es']
+
+        self.v = constants['nu']
+
+        # Geometrical parameters
+        self.rho_x = constants['rho_x']      #TODO: ensure that rho is not the same for every layer? define rho as vector directly at the start
+        self.rho_y = constants['rho_y']
+
+
+        # Other constants:
         self.tole = 1e-9
+        self.ff = .0001
 
 
     
     def principal(self, ex, ey, gxy):
-        """ ------------------------------ Calculation of Principal Strains and Direction ------------------------------
-            ----------------------------------------    INPUT: -------------------------------------------------
-            - ex, ey, gxy:  In plane strains
-            ------------------------------------------- OUTPUT:-------------------------------------------------
-            - e1, e3:       Principal strains
-            - th:           Principal direction (in range -pi/2 to pi/2
-        -------------------------------------------------------------------------------------------------------------"""
-        # 1 Mohr's Circle of imposed total strains
+        """
+        Vectorised principal strains and direction.
+        Args:
+            ex, ey, gxy:  shape (n_tot, nl, 3)
+        Returns:
+            e1, e3:       shape (n_tot, nl, 3)
+            th:           shape (n_tot, nl, 3)
+            submodel:     shape (n_tot, nl, 3), int (1, 2, or 3)
+        """
+        # 1 Mohr's Circle
+        re = 0.5 * np.sqrt((ex - ey)**2 + gxy**2)
+        me = 0.5 * (ex + ey)
+        e1 = me + re
+        e3 = me - re
 
-        re = 1/2*np.sqrt((ex - ey) ** 2 + gxy ** 2)
-        me = (ex + ey) * 1/2
+        # 2 Principal direction th
+        # Default: atan(gxy / (2*(e1-ex)))
+        denom = 2 * (e1 - ex)
+        th = np.arctan(np.where(np.abs(denom) > 1e-10, gxy / denom, 0.0))
 
-        e1 = me  + re
-        e3 = me  - re
+        # Override where e1 ≈ ex (degenerate cases)
+        near_ex = np.abs(e1 - ex) < 1e-10
+        th = np.where(near_ex & (ex > ey),  np.pi/2 - 1e-10, th)
+        th = np.where(near_ex & (ex < ey),  1e-10,            th)
+        th = np.where(near_ex & (ex == ey), np.pi/4,          th)
 
-        if abs(self.e1 - ex) < 10**-10:
-            if ex > ey:
-                th = np.pi/2-10**(-10)
-            elif ex < ey:
-                th = 10**(-10)
-            elif ex == ey:
-                th = np.pi/4
-        else:
-            th = np.atan(gxy / (2 * (e1 - ex)))
+        # 3 Submodel
+        tole = self.tole
+        threshold = self.ect * 0 + tole          # scalar (as in original)
+        submodel = np.where(
+            (e1 > threshold) & (e3 > threshold), 3,
+            np.where(
+                (e1 <= threshold) & (e3 <= threshold), 1,
+                2
+            )
+        ).astype(int)
 
-        # 1.1 Correct theta to not be exactly 0 or 90° (optional)
-        # if abs(self.th) > 0:
-            # if abs(self.th)>pi/2*89/90:
-            #     self.th = self.th/(abs(self.th))*89/90*pi/2
-            #
-            # if abs(self.th) < pi/2*1/90:
-            #     self.th = self.th / (abs(self.th)) * 1 / 90 * pi / 2
-
-        # 2 Submodel based on imposed strain state
-        if e1 > self.ect*0+self.tole and e3 > self.ect*0+self.tole:
-            submodel = 3
-        elif e1 <= self.ect*0+self.tole and e3 <= self.ect*0+self.tole:
-            submodel = 1
-        else:
-            submodel = 2
-
-        # 3 Mohr's Circle of concrete strains
-        # 3.1 Crack inclinations depending on rotating or fixed cracks (here: always rotating)
-        thr = th
-        thc = th
-
-        # 3.2 Concrete strains in n-t and x-y. For Fixed cracks: Starting values for iteration.
+        # 4 Concrete strains
+        thc = th                                 # rotating cracks: thc = th
         ec3 = e3
-        ec1 = 0
-        if e1 < self.tole:
-            ec1 = e1
-        gctn = 0
-        ecn = 0
+        ec1 = np.where(e1 < tole, e1, 0.0)
 
-        if ec3 < 0:
-            ecx = ec1 + (ec3-ec1)*np.cos(thc)**2
-            ecy = ec1 + (ec3-ec1)*np.sin(thc)**2
+        ecx = np.where(ec3 < 0, ec1 + (ec3 - ec1) * np.cos(thc)**2, 0.0)
+        ecy = np.where(ec3 < 0, ec1 + (ec3 - ec1) * np.sin(thc)**2, 0.0)
 
-        else:
-            ecx = 0
-            ecy = 0
-
-        return e1, e3, th
+        return e1, e3, th, submodel
 
 
-    def out(self, e):
+    def sigma_cart_1(self):
+        '''
+        Calculate linear elastic stresses
+        '''
+
+        ex = self.e[:,:,0]
+        ey = self.e[:,:,1]
+        gxy = self.e[:,:,2]
+
+        E = self.Ec
+        v = self.v
+
+        sx_x = E/(1-v**2)*ex
+        sx_y = E/(1-v**2)*v*ey
+        sx_xy = np.zeros_like(self.e[:,:,0])
+        sy_x = E/(1-v**2)*v*ex
+        sy_y = E/(1-v**2)*ey
+        sy_xy = np.zeros_like(self.e[:,:,0])
+        txy_x = np.zeros_like(self.e[:,:,0])
+        txy_y = np.zeros_like(self.e[:,:,0])
+        txy_xy = E/(1-v**2)*(1-v)/2*gxy
+
+        sx = sx_x + sx_y + sx_xy
+        sy = sy_x + sy_y + sy_xy
+        txy = txy_x + txy_y + txy_xy
+
+        # ssx = ex*self.Esx
+        # ssy = ey*self.Esy
+        # sc3 = e3*self.Ec
+        # sc1 = e1*self.Ec
+
+        return sx, sy, txy
+
+
+    def out(self, sprev_klij = None, do_cracked=True):
         """ ------------------------------------------- Define Output---------------------------------------------------
             --------------------------------------------    INPUT: -----------------------------------------------------
             - e:        [ex_klij,ey_klij,gxy_klij,gxz_klij,gyz_klij] strain state in integration point
@@ -102,59 +133,39 @@ class ConstitutiveLaws():
         -------------------------------------------------------------------------------------------------------------"""
 
         # 1 Assign Strain Values
-        self.ex = e[0]*cplx(1,0)
-        self.ey = e[1]*cplx(1,0)
-        self.gxy = e[2]*cplx(1,0)
-        self.gxz = e[3]*cplx(1,0)
-        self.gyz = e[4]*cplx(1,0)
+        ex = self.e[:,:,0]*cplx(np.ones_like(self.e[:,:,0]),np.zeros_like(self.e[:,:,1]))
+        ey = self.e[:,:,1]*cplx(np.ones_like(self.e[:,:,0]),np.zeros_like(self.e[:,:,1]))
+        gxy = self.e[:,:,2]*cplx(np.ones_like(self.e[:,:,0]),np.zeros_like(self.e[:,:,1]))
 
         # 2 Calculate Stresses based on given constitutive model and strain state
-        self.principal()
-
-        # Flag
-        # if do_cracked == False:
-        #     if self.e1 * self.Ec < self.fct * 1.5:
-        #         self.cm_klij = 1
+        e1, e3, th, submodel = self.principal(ex, ey, gxy)
 
         if do_cracked == False:
-            if hasattr(self.sprev_klij,'crackflag'):
-                self.crackflag = 1
+            raise UserWarning('Not tested for do_cracked == False')
+            if hasattr(sprev_klij,'crackflag'):
+                crackflag = 1
                 pass
-            elif self.e1*self.Ec < self.fct:
+            elif e1*self.Ec < self.fct:
+                e1, e3, th, submodel = self.principal(ex, ey, gxy)
                 self.cm_klij = 1
-                self.principal()
             else:
-                self.crackflag = 1
+                crackflag = 1
 
         if self.cm_klij == 1:
-            self.sigma_cart_1()
+            sx, sy, txy = self.sigma_cart_1()
         elif self.cm_klij == 3:
-            if self.submodel == 3:
-                self.sigma_cart_33()
-            elif self.submodel == 1:
-                self.sigma_cart_31()
+            if submodel == 3:
+                sx, sy, txy = self.sigma_cart_33()
+            elif submodel == 1:
+                sx, sy, txy = self.sigma_cart_31()
             else:
-                self.sigma_cart_32()
-        self.sigma_shear()
+                sx, sy, txy = self.sigma_cart_32()
 
-        # # 3 Output
-        # # Flag
-        # ff = .0001
-        # # if abs(self.txy)<ff*self.Ec/2*abs(self.gxy):
-        # #     self.txy = ff*self.Ec/2*self.gxy
-
-        # if abs(self.txy)<ff*self.rhox*self.Esx/2*abs(self.gxy):
-        #     self.txy = ff*self.rhox * self.Esx / 2 * self.gxy
-
-
-        # self.s = [self.sx,self.sy,self.txy,self.txz,self.tyz]
 
         # 3 Output
-        ff=self.Ec/100
-        if abs(self.txy.imag) < abs(self.gxy.imag)*ff/2:
-            self.txy = cplx(self.txy.real,self.gxy.imag*ff/2)
-        # if abs(self.sy.imag) < abs(self.ey.imag)*ff:
-        #     self.sy = cplx(self.sy.real,self.ey.imag*ff)
-        s = [self.sx,self.sy,self.txy,self.txz,self.tyz]
+        mask = np.abs(txy) < self.ff * self.rho_x * self.Esx / 2 * np.abs(gxy)
+        txy = np.where(mask, self.ff * self.rho_x * self.Esx / 2 * gxy, txy)
+        
+        s = np.stack((sx, sy, txy), axis = 2)
 
         return s

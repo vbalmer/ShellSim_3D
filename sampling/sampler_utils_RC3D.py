@@ -28,7 +28,7 @@ def get_constant_sampling_params(sample_2d:bool) -> tuple:
 
     c = {
         'n_samples_2D': 1e6, 
-        'n_samples_3D': 4e9,
+        'n_samples_3D': 1e6,         #4e9,
 
         'min': [-3e-3]*2 + [-4e-3],
         'max': [5e-3]*2  + [4e-3],
@@ -43,6 +43,8 @@ def get_constant_sampling_params(sample_2d:bool) -> tuple:
         'D': 16,
         'Dmax': 16,
         's': 200,
+        'rho_x': 0.025,
+        'rho_y': 0.025,
         'rho_sublayer': True,
 
     }
@@ -55,9 +57,13 @@ def get_constant_sampling_params(sample_2d:bool) -> tuple:
     if not sample_2d:
         c.update(c_3D)
 
-    # TODO: select which type of concrete and only calculate with one value in mat_dict from then on.
-    dict_CC.update({'fsy': c["fsy"], 'fsu': c["fsu"], 'Es': c["Es"], 'Esh': c["Esh"], 'D': c["D"], 'Dmax': c["Dmax"], 's': c["s"]})
-    mat_dict = dict_CC
+    
+    # select values for concrete: 
+    idx = dict_CC['CC'].index(c['CC'])
+    dict_CC_one = {key: values[idx] for key, values in dict_CC.items()}
+
+    dict_CC_one.update({'fsy': c["fsy"], 'fsu': c["fsu"], 'Es': c["Es"], 'Esh': c["Esh"], 'D': c["D"], 'Dmax': c["Dmax"], 's': c["s"]})
+    mat_dict = dict_CC_one
 
     return c, mat_dict
 

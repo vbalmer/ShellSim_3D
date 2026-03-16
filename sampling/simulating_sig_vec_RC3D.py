@@ -4,6 +4,8 @@
 
 import numpy as np
 
+from constitutive_laws import *
+
 # potentially all these functions need to be carried out in batched manner / on gpu.
 
 class SigSimulator:
@@ -22,43 +24,57 @@ class SigSimulator:
 
         """
 
-        n_tot = self.eps_g.shape[0]
+        n_tot = eps_g.shape[0]
         t = self.constants['t']                         # int
         nl = self.constants['n_layer']                  # int
-        l=np.linspace(0,nl, nl+1, dtype=int)            # shape (nl,)
-        z = -t/2+(2*l+1)*t/(2 * nl)                     # shape (nl,)
+        # l=np.linspace(0,nl, nl+1, dtype=int)            # shape (nl,)
+        # z = -t/2+(2*l+1)*t/(2 * nl)                     # shape (nl,)
         
-        I3 = np.eye(3)
-        Z  = np.einsum('ij,kl->klij', I3, -z)           # shape (n_tot, nl, 3, 6)
+        # I3 = np.eye(3)
+        # Z  = np.einsum('ij,kl->klij', I3, -z)           # shape (n_tot, nl, 3, 6)
+        # S = np.concatenate(
+        #     [np.broadcast_to(I3, (n_tot, nl, 3, 3)), Z],
+        #       axis=-1)  
+        # e = S @ eps_g                                   # shape (n_tot, nl, 3)
+
+
+        l = np.arange(nl)                            # (nl,)
+        z = -t/2 + (2*l+1)*t/(2*nl)                  # (nl,)
+
+        I3 = np.eye(3)                               # (3, 3)
+        Z  = np.einsum('ij,k->kij', I3, -z)          # (nl, 3, 3)
+
         S = np.concatenate(
-            [np.broadcast_to(I3, (n_tot, nl, 3, 3)), Z],
-              axis=-1)  
-        e = S @ self.eps_g                              # shape (n_tot, nl, 3)
+            [np.broadcast_to(I3, (nl, 3, 3)), Z],
+            axis=-1
+        )                                             # (nl, 3, 6)
+
+        e = (S[np.newaxis] @ eps_g[:, np.newaxis, :, np.newaxis]).squeeze(-1)           #(1,nl,3,6) @ (n_tot,1,6,1) -> (n_tot,nl,3)
+
 
         print('Calculated layer strains e')
         return e
 
 
-    def find_s_vec(self, e, go = 1):
+    def find_s_vec(self, e, mat_dict, go = 1) -> np.array:
         """
         Vectorised version of Andreas' function find s for go = 1
 
         """
         # Entire file "Stresses_mixedreinf.py" in vectorised form
-        # TODO!
-        s = None
-
+        material_law = ConstitutiveLaws(e, self.constants, mat_dict, cm_klij=1)
+        s = material_law.out()
 
         print('Calculated layer stresses s')
         return s
 
 
-    def find_sh_vec(self, s, go = 1):
+    def find_sh_vec(self, s, go = 1) -> np.array:
         """
         Vectorised version of Andreas' function find sh for go = 1
 
         Args:
-            s   (np.arr): layer stresses (n_tot, 20, 6)
+            s   (np.arr): layer stresses (n_tot, 20, 3)
         Returns:
             sh  (np.arr): generalised stresses (n_tot, 6)
 
@@ -67,17 +83,18 @@ class SigSimulator:
         n_tot = s.shape[0]                          
         t = self.constants['t']                         # int
         nl = self.constants['n_layer']                  # int
-        l=np.linspace(0,nl, nl+1, dtype=int)            # shape (nl,)
+        l = np.arange(nl)                               # shape (nl,)
         z = -t/2+(2*l+1)*t/(2 * nl)                     # shape (nl,)
 
 
         I3 = np.eye(3)
-        Z  = np.einsum('ij,kl->klij', I3, -z)           # shape (n_tot, nl, 3, 6)
-        S = np.concatenate(
-            [np.broadcast_to(I3, (n_tot, nl, 3, 3)), Z],
-              axis=-1)  
+        Z  = np.einsum('ij,k->kij', I3, -z)             # shape (nl, 3, 3)
+        S = np.concatenate(                             # shape (n_tot, nl, 3, 6)
+            [np.broadcast_to(I3, (n_tot, nl, 3, 3)),
+            np.broadcast_to(Z,  (n_tot, nl, 3, 3))],
+            axis=-1)                                            
         
-        s.reshape(n_tot, nl, 3, 1)                      # shape (n_tot, nl, 3, 1)
+        s = s.reshape(n_tot, nl, 3, 1)                  # shape (n_tot, nl, 3, 1)
 
         sh = (S.transpose(0,1,3,2)@s).squeeze(-1)       # shape (n_tot, nl, 6)
 
@@ -88,7 +105,7 @@ class SigSimulator:
         return sh
 
 
-    def find_dh_vec(self, s, go = 1):
+    def find_dh_vec(self, s, go = 1) -> np.array:
         """
         Vectorised version of Andreas' function find dh for go = 1
 

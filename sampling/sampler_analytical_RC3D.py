@@ -5,8 +5,8 @@
 import os
 import numpy as np
 
-from sampling.sampler_utils_RC3D import *
-from sampling.simulating_sig_vec_RC3D import *
+from sampler_utils_RC3D import *
+from simulating_sig_vec_RC3D import *
 
 
 SAMPLE_2D = False
@@ -48,10 +48,13 @@ simulatesig = SigSimulator(constants)
 e = simulatesig.find_e_vec(eps_g)
 
 # 2.2 Find layer stresses
-s = simulatesig.find_s_vec(e)
+s = simulatesig.find_s_vec(e, mat_dict)
 
 # 2.3 Find generalised stresses
 sh = simulatesig.find_sh_vec(s)
 
 # 2.4 Find stiffnesses
 dh = simulatesig.find_dh_vec(s)
+
+# 2.5 Save generalised stresses
+#TODO!
