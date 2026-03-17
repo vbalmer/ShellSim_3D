@@ -37,7 +37,7 @@ else:
 
     
     # 1.2 - save 3D generalised strains
-    save_3D_eps(eps_g, save_data_dir)
+    save_3D_data(eps_g, save_data_dir, filename = 'eps_g')
 
 
 ############################ 2 - Simulating stresses ############################
@@ -51,10 +51,10 @@ e = simulatesig.find_e_vec(eps_g)
 s = simulatesig.find_s_vec(e, mat_dict)
 
 # 2.3 Find generalised stresses
-sh = simulatesig.find_sh_vec(s)
+sig_g = simulatesig.find_sh_vec(s)
 
 # 2.4 Find stiffnesses
-dh = simulatesig.find_dh_vec(s)
+dh = simulatesig.find_dh_vec(s, mat_dict)
 
 # 2.5 Save generalised stresses
-#TODO!
+save_3D_data(sig_g, save_data_dir, filename = 'sig_g')

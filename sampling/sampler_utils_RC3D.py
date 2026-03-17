@@ -394,17 +394,17 @@ def permute_and_save(eps_l: np.array, constants:dict, save_dir, save_batchwise: 
     print(f'Done — saved {k+1} batches to {save_dir}')
 
 
-def save_3D_eps(eps_g:np.array, save_dir):
+def save_3D_data(data_:np.array, save_dir:str, filename:str):
     t2 = time.perf_counter()
-    with h5py.File(os.path.join(save_dir,f'output_eps_g.h5'), 'w') as f:
-        f.create_dataset('eps_g',     data = eps_g,     dtype='float32')
-    print(f'time save_eps: {(time.perf_counter()-t2)/60:.2f}min')
+    with h5py.File(os.path.join(save_dir,f'output_'+ filename +'.h5'), 'w') as f:
+        f.create_dataset(filename,     data = data_,     dtype='float32')
+    print(f'time save_data {filename}: {(time.perf_counter()-t2)/60:.2f}min')
 
 
 
 ########################################## Visualising ##########################################
 
-def plot_3D_eps(save_data_path, n_every: int = int(1e3)):
+def plot_3D_data(save_data_path, filename, n_every: int = int(1e3)):
     """
     visualise sampled strains
 
@@ -417,7 +417,7 @@ def plot_3D_eps(save_data_path, n_every: int = int(1e3)):
     fig = plt.figure(figsize=(14, 7))
     
     t0 = time.perf_counter()
-    data = read_h5_file(save_data_path, n_every)
+    data = read_h5_file(save_data_path, filename, n_every)
     print(f'time reading file: {(time.perf_counter()-t0)/60:.2f}min')
 
     for i in range(2):
@@ -429,21 +429,22 @@ def plot_3D_eps(save_data_path, n_every: int = int(1e3)):
         
         ax = fig.add_subplot(1, 2, i + 1, projection='3d')
         ax.scatter(x, y, z, s=2, alpha=0.5)
-        figure_formatting(ax, i)
+        figure_formatting(ax, i, filename)
         print(f'time plotting: {(time.perf_counter()-t1)/60:.2f}min')
 
     t2 = time.perf_counter()
     plt.tight_layout()
-    plt.savefig(os.path.join(os.getcwd(), "sampling\\plots\\scatter_eps_g.png"))
-    print('Saved scatter_eps_g to sampling\\plots\\scatter_eps_g.png')
+    plt.savefig(os.path.join(os.getcwd(), "sampling\\plots\\" + filename + ".png"))
+    print(f'Saved {filename} to sampling\\plots\\{filename}.png')
     print(f'time saving figure: {(time.perf_counter()-t2)/60:.2f}min')
 
     return
 
 
-def read_h5_file(save_data_path, n_every:int) -> tuple:
+def read_h5_file(save_data_path, filename, n_every:int) -> tuple:
+    name = filename[-5:]
     with h5py.File(save_data_path, 'r') as f:
-        data = f['eps_g'][::n_every,:]
+        data = f[name][::n_every,:]
 
     # this is quite slow...
     # with h5py.File(save_data_path, 'r') as f:
@@ -454,12 +455,23 @@ def read_h5_file(save_data_path, n_every:int) -> tuple:
     return data
 
 
-def figure_formatting(ax, i):
-    if i == 0:
-        ax.set_xlabel('eps_x')
-        ax.set_ylabel('eps_y')
-        ax.set_zlabel('gamma_xy')
-    elif i == 1:
-        ax.set_xlabel('chi_x')
-        ax.set_ylabel('chi_y')
-        ax.set_zlabel('chi_xy')
+def figure_formatting(ax, i, filename):
+    if 'eps' in filename:
+        if i == 0:
+            ax.set_xlabel('eps_x')
+            ax.set_ylabel('eps_y')
+            ax.set_zlabel('gamma_xy')
+        elif i == 1:
+            ax.set_xlabel('chi_x')
+            ax.set_ylabel('chi_y')
+            ax.set_zlabel('chi_xy')
+
+    elif 'sig' in filename: 
+        if i == 0:
+            ax.set_xlabel('n_x')
+            ax.set_ylabel('n_y')
+            ax.set_zlabel('n_xy')
+        elif i == 1:
+            ax.set_xlabel('m_x')
+            ax.set_ylabel('m_y')
+            ax.set_zlabel('m_xy')
