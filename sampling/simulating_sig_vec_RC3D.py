@@ -3,6 +3,7 @@
 
 
 import numpy as np
+import time
 
 from constitutive_laws import *
 
@@ -23,19 +24,10 @@ class SigSimulator:
             e       (np.arr): layer strains (n_tot, 20, 3)
 
         """
-
+        t0 = time.perf_counter()
         n_tot = eps_g.shape[0]
         t = self.constants['t']                         # int
         nl = self.constants['n_layer']                  # int
-        # l=np.linspace(0,nl, nl+1, dtype=int)            # shape (nl,)
-        # z = -t/2+(2*l+1)*t/(2 * nl)                     # shape (nl,)
-        
-        # I3 = np.eye(3)
-        # Z  = np.einsum('ij,kl->klij', I3, -z)           # shape (n_tot, nl, 3, 6)
-        # S = np.concatenate(
-        #     [np.broadcast_to(I3, (n_tot, nl, 3, 3)), Z],
-        #       axis=-1)  
-        # e = S @ eps_g                                   # shape (n_tot, nl, 3)
 
 
         l = np.arange(nl)                            # (nl,)
@@ -51,8 +43,8 @@ class SigSimulator:
 
         e = (S[np.newaxis] @ eps_g[:, np.newaxis, :, np.newaxis]).squeeze(-1)           #(1,nl,3,6) @ (n_tot,1,6,1) -> (n_tot,nl,3)
 
-
-        print('Calculated layer strains e')
+        t1 =(time.perf_counter()-t0)
+        print(f'Calculated layer strains e in {t1/60:.2f} min.')
         return e
 
 
@@ -66,11 +58,13 @@ class SigSimulator:
             s       (np.arr): layer stresses (n_tot, 20, 3), as complex array -> can use img part in d calculation.
 
         """
+        t0 = time.perf_counter()
         # Entire file "Stresses_mixedreinf.py" in vectorised form
-        material_law = ConstitutiveLaws(e, self.constants, mat_dict, cm_klij=1)
+        material_law = ConstitutiveLaws(e, self.constants, mat_dict, cm_klij=3)
         s = material_law.out()
 
-        print('Calculated layer stresses s')
+        t1 =(time.perf_counter()-t0)
+        print(f'Calculated layer stresses s in {t1/60:.2f} min.')
         return s
 
 
@@ -84,7 +78,7 @@ class SigSimulator:
             sh  (np.arr): generalised stresses (n_tot, 6), as non-complex number
 
         """
-
+        t0 = time.perf_counter()
         n_tot = s.shape[0]                          
         t = self.constants['t']                         # int
         nl = self.constants['n_layer']                  # int
@@ -106,8 +100,8 @@ class SigSimulator:
 
         sh = (t/nl)*sh.sum(axis = 1)                    # shape (n_tot, 6)
 
-
-        print('Calculated generalised stresses sh')
+        t1 =(time.perf_counter()-t0)
+        print(f'Calculated generalised stresses sh in {t1/60:.2f} min.')
         return sh
 
 
@@ -121,6 +115,7 @@ class SigSimulator:
             dh       (np.arr): stiffness matrix entries (n_tot, 6, 6)
 
         """
+        t0 = time.perf_counter()
         t = self.constants['t']
         nl = self.constants['n_layer']
         l = np.arange(nl)                               # shape (nl,)
@@ -142,7 +137,8 @@ class SigSimulator:
         De_2 = np.concatenate([Dmbh, Dbh], axis=2)          # (n_tot, 3, 6)
         De   = np.concatenate([De_1, De_2], axis=1)         # (n_tot, 6, 6)
 
-        print('Calculated stiffness matrix D')
+        t1 =(time.perf_counter()-t0)
+        print(f'Calculated stiffness matrix D in {t1/60:.2f} min.')
         return De
     
 

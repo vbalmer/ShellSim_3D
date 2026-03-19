@@ -43,8 +43,8 @@ def get_constant_sampling_params(sample_2d:bool) -> tuple:
         'D': 16,
         'Dmax': 16,
         's': 200,
-        'rho_x': 0.025,
-        'rho_y': 0.025,
+        'rho_x': [0.025]*4 + [0]*12 + [0.025]*4,    # length of the array needs to correspond to the amount of layers.
+        'rho_y': [0.025]*4 + [0]*12 + [0.025]*4,
         'rho_sublayer': True,
 
     }
@@ -196,17 +196,17 @@ class samplers:
         g0, g1 = group_grids[0], group_grids[1]
         n0, n1 = len(g0), len(g1)
 
-        print(f'g0 shape: {g0.shape}')  # should be (40^3, 3) = (64000, 3)
-        print(f'g1 shape: {g1.shape}')  # should be (40^3, 3) = (64000, 3)
-        print(f'g1 unique values per dim:')
-        for j in range(3):
-            print(f'  dim {j}: {len(np.unique(g1[:,j]))} unique values')
+        # print(f'g0 shape: {g0.shape}')  # should be (40^3, 3) = (64000, 3)
+        # print(f'g1 shape: {g1.shape}')  # should be (40^3, 3) = (64000, 3)
+        # print(f'g1 unique values per dim:')
+        # for j in range(3):
+        #     print(f'  dim {j}: {len(np.unique(g1[:,j]))} unique values')
 
         points = np.empty((n0 * n1, n_dims), dtype=np.float32)
         points[:, :group_size] = np.repeat(g0, n1, axis=0)   # repeat each row of g0 n1 times
         points[:, group_size:] = np.tile(g1, (n0, 1))         # tile g1 n0 times
 
-        print(f'After tile, unique values in last dim: {len(np.unique(points[:, -1]))}')
+        # print(f'After tile, unique values in last dim: {len(np.unique(points[:, -1]))}')
 
         return points
 
