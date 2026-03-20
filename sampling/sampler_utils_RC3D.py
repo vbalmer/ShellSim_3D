@@ -409,7 +409,8 @@ def plot_3D_data(save_data_path, filename, n_every: int = int(1e3)):
     visualise sampled strains
 
     Args:
-        save_data_path (str)     
+        save_data_path (str): location where to save the plot
+        filename (str): Either "scatter_eps_g" or "scatter_sig_g"     
 
     """
     
@@ -428,7 +429,7 @@ def plot_3D_data(save_data_path, filename, n_every: int = int(1e3)):
         print(f'Plotting {len(x)/1e6}*1e6/{len(x)/(1e6)*n_every}*1e6 points')
         
         ax = fig.add_subplot(1, 2, i + 1, projection='3d')
-        ax.scatter(x, y, z, s=2, alpha=0.5)
+        ax.scatter(x, y, z, s=2, alpha=0.1)
         figure_formatting(ax, i, filename)
         print(f'time plotting: {(time.perf_counter()-t1)/60:.2f}min')
 
