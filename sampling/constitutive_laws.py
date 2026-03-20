@@ -273,7 +273,8 @@ class ConstitutiveLaws():
             c_ep = -e * srm + 2 * ec_ep * (srm / 2 - x1_ep) + (self.fsy / self.Es + ec_ep) * x1_ep
             b_ep = 2 * (self.fsy / self.Es - ec_ep)
             a_ep = 4 * self.tb1 / (self.D * self.Esh)
-            x2_ep = (-b_ep + np.sqrt(b_ep**2 - 4 * a_ep * c_ep)) / (2 * a_ep)
+            discriminant = np.where(mask_ep,b_ep**2 - 4 * a_ep * c_ep,0.0)
+            x2_ep = (-b_ep + np.sqrt(discriminant)) / (2 * a_ep)
 
             ssr_ep = ec_ep * self.Es + x1_ep * 4 * self.tb0 / self.D + x2_ep * 4 * self.tb1 / self.D
 
@@ -325,7 +326,8 @@ class ConstitutiveLaws():
         # 2.4.3 Partially elastic
         s2 = (self.fsy - self.Es * e) * self.tb1 * srm / self.D * (self.tb0 / self.tb1 - self.Es / self.Esh)
         s2 = s2 + self.Es / self.Esh * self.tb0 * self.tb1 * srm ** 2 / self.D ** 2
-        s2 = self.tb0 * srm / self.D - np.sqrt(s2)
+        discriminant = np.where(mask_partial,s2,0.0)
+        s2 = self.tb0 * srm / self.D - np.sqrt(discriminant)                # to avoid warning in output.
         s2 = self.fsy + 2 * s2 / (self.tb0 / self.tb1 - self.Es / self.Esh)
         ss_out[mask_partial] = s2[mask_partial]
 
@@ -349,13 +351,15 @@ class ConstitutiveLaws():
         # 1 Initial Assumption
         # 1.1 in x
         mask_rhox = self.rho_x > 1e-9
-        srx0_mask = np.where(mask_rhox, (2 * self.tb0 / self.D * self.rho_x) ** (-1) * self.fct * (1 - self.rho_x), 1e3)
+        denom_x = np.where(mask_rhox, 2 * self.tb0 / self.D * self.rho_x, 1.0)  # safe dummy in false branch, to avoid divide by zero warning.
+        srx0_mask = np.where(mask_rhox, self.fct * (1 - self.rho_x) / denom_x, 1e3)
         srxmax = np.where(mask_rhox, self.D / (2 * self.tb0) * self.fsy + self.D / (2 * self.tb1) * (self.fsu - self.fsy), 1e3)
         srx0 = np.minimum(srx0_mask, srxmax)
 
         # 1.2 in y
         mask_rhoy = self.rho_y > 1e-9
-        sry0_mask = np.where(mask_rhoy, (2 * self.tb0 / self.D * self.rho_y) ** (-1) * self.fct * (1 - self.rho_y), 1e3)
+        denom_y = np.where(mask_rhoy, 2 * self.tb0 / self.D * self.rho_y, 1.0)  # safe dummy in false branch, to avoid divide by zero warning.
+        sry0_mask = np.where(mask_rhoy, self.fct * (1 - self.rho_y) / denom_y, 1e3)
         srymax = np.where(mask_rhoy, self.D / (2 * self.tb0) * self.fsy + self.D / (2 * self.tb1) * (self.fsu - self.fsy), 1e3)
         sry0 = np.minimum(sry0_mask, srymax)
 
@@ -434,11 +438,11 @@ class ConstitutiveLaws():
         _,_,th,_,_,_,ec1,ec3 = self.principal(e[:,:,0:1], e[:,:,1:2], e[:,:,2:3]) 
         
         # 2 Steel Contribution
-        ssx = np.zeros((e.shape[0], e.shape[1],1))
+        ssx = np.zeros((e.shape[0], e.shape[1],1), dtype = np.complex64)
         mask_rhox = (self.rho_x != 0)
         ssx[mask&mask_rhox] = self.ss_bilin(e[:,:,0:1][mask&mask_rhox])
 
-        ssy = np.zeros((e.shape[0], e.shape[1],1))
+        ssy = np.zeros((e.shape[0], e.shape[1],1), dtype = np.complex64)
         mask_rhoy = (self.rho_y != 0)
         ssy[mask&mask_rhoy] = self.ss_bilin(e[:,:,1:2][mask&mask_rhoy])
 
@@ -476,7 +480,7 @@ class ConstitutiveLaws():
         srx, sry = self.sr0_vc(th)
 
         # 2 Steel Contribution
-        ssx = np.zeros((e.shape[0], e.shape[1],1))
+        ssx = np.zeros((e.shape[0], e.shape[1],1), dtype = np.complex64)
         mask_rhox = (self.rho_x != 0)
         mask_e = e[:,:,0:1] > ecx
         mask_1_x = mask & mask_rhox & mask_e
@@ -485,7 +489,7 @@ class ConstitutiveLaws():
         mask_2_x = mask & mask_rhox & ~mask_e
         ssx[mask_2_x] = self.ss_bilin(self.e[:,:,0:1][mask_2_x])
 
-        ssy = np.zeros((e.shape[0], e.shape[1],1))
+        ssy = np.zeros((e.shape[0], e.shape[1],1), dtype=np.complex64)
         mask_rhoy = (self.rho_y != 0)
         mask_e_y = e[:,:,1:2] > ecy
         mask_1_y = mask & mask_rhoy & mask_e_y
@@ -531,12 +535,12 @@ class ConstitutiveLaws():
         srx, sry = self.sr0_vc(th)
 
         # 2 Steel contribution
-        ssx = np.zeros((e.shape[0], e.shape[1],1))
+        ssx = np.zeros((e.shape[0], e.shape[1],1), dtype = np.complex64)
         mask_rhox = (self.rho_x != 0)
         ssx[mask&mask_rhox] = self.ssr(self.e[:,:,0:1][mask&mask_rhox], ecx[mask&mask_rhox], self.ecsx, 
                                        srx[mask&mask_rhox], self.rho_x[mask&mask_rhox])
 
-        ssy = np.zeros((self.e.shape[0], self.e.shape[1],1))
+        ssy = np.zeros((self.e.shape[0], self.e.shape[1],1), dtype = np.complex64)
         mask_rhoy = (self.rho_y != 0)
         ssy[mask&mask_rhoy] = self.ssr(self.e[:,:,1:2][mask&mask_rhoy], ecy[mask&mask_rhoy], self.ecsy, 
                                        sry[mask&mask_rhoy], self.rho_y[mask&mask_rhoy])
@@ -598,9 +602,9 @@ class ConstitutiveLaws():
             mask1 = (submodel == 1)
             mask2 = ~mask3 & ~mask1
 
-            sx  = np.zeros((n_tot, self.nl, 1))
-            sy  = np.zeros((n_tot, self.nl, 1))
-            txy = np.zeros((n_tot, self.nl, 1))
+            sx  = np.zeros((n_tot, self.nl, 1), dtype = np.complex64)
+            sy  = np.zeros((n_tot, self.nl, 1), dtype = np.complex64)
+            txy = np.zeros((n_tot, self.nl, 1), dtype = np.complex64)
 
             sx[mask3], sy[mask3], txy[mask3] = self.sigma_cart_33(mask3)
             sx[mask1], sy[mask1], txy[mask1] = self.sigma_cart_31(mask1)

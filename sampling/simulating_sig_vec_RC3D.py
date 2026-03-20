@@ -55,16 +55,31 @@ class SigSimulator:
             e       (np.arr): layer strains (n_tot, 20, 3)
             mat_dict  (dict): material parameters (defined in main file)
         Returns:
-            s       (np.arr): layer stresses (n_tot, 20, 3), as complex array -> can use img part in d calculation.
+            s       (np.arr): layer stresses (n_tot, 20, 3, 3), as complex array -> can use img part in d calculation.
 
         """
         t0 = time.perf_counter()
         # Entire file "Stresses_mixedreinf.py" in vectorised form
-        material_law = ConstitutiveLaws(e, self.constants, mat_dict, cm_klij=3)
-        s = material_law.out()
+        s = np.zeros((e.shape[0], e.shape[1], 3, 3), dtype=np.complex64)
 
+        e0 = e+np.array([0.0000000000000001j,0,0])
+        material_law0 = ConstitutiveLaws(e0, self.constants, mat_dict, cm_klij=3)
+        s[:,:,0,:] = material_law0.out().squeeze(-1)
         t1 =(time.perf_counter()-t0)
-        print(f'Calculated layer stresses s in {t1/60:.2f} min.')
+        print(f'Calculated 1/3 instance of layer stresses s in {t1/60:.2f} min.')
+
+        e1 = e+np.array([0,0.0000000000000001j,0])
+        material_law1 = ConstitutiveLaws(e1, self.constants, mat_dict, cm_klij=3)
+        s[:,:,1,:] = material_law1.out().squeeze(-1)
+        t2 =(time.perf_counter()-t0)
+        print(f'Calculated 2/3 instance of layer stresses s in {t2/60:.2f} min.')
+
+        e2 = e+np.array([0,0,0.0000000000000001j])
+        material_law2 = ConstitutiveLaws(e2, self.constants, mat_dict, cm_klij=3)
+        s[:,:,2,:] = material_law2.out().squeeze(-1)
+        t3 =(time.perf_counter()-t0)
+        print(f'Calculated 3/3 instance of layer stresses s in {t3/60:.2f} min.')
+
         return s
 
 
@@ -73,7 +88,7 @@ class SigSimulator:
         Vectorised version of Andreas' function find sh for go = 1
 
         Args:
-            s   (np.arr): layer stresses (n_tot, 20, 3)
+            s   (np.arr): layer stresses (n_tot, 20, 3, 3)
         Returns:
             sh  (np.arr): generalised stresses (n_tot, 6), as non-complex number
 
@@ -93,7 +108,7 @@ class SigSimulator:
             np.broadcast_to(Z,  (n_tot, nl, 3, 3))],
             axis=-1)                                            
         
-        s = s.reshape(n_tot, nl, 3, 1)                  # shape (n_tot, nl, 3, 1)
+        s = s[:,:,0,:].reshape(n_tot, nl, 3, 1)                  # shape (n_tot, nl, 3, 1)
         s = s.real
 
         sh = (S.transpose(0,1,3,2)@s).squeeze(-1)       # shape (n_tot, nl, 6)
@@ -125,7 +140,7 @@ class SigSimulator:
         Dbh = np.zeros((s.shape[0],3,3))
         Dmbh = np.zeros((s.shape[0],3,3))
 
-        Dp = self.get_et(s, mat_dict, cm_klij = 1)       # shape (n_tot, 20, 3, 3)
+        Dp = self.get_et(s, mat_dict, cm_klij = 3)       # shape (n_tot, 20, 3, 3)
 
         z_ = z.reshape(1, -1, 1, 1)
 
@@ -146,7 +161,7 @@ class SigSimulator:
         """
         Calculates per-layer stiffness matrix
         Args:
-            s       (np.arr): layer stresses (n_tot, 20,3)
+            s       (np.arr): layer stresses (n_tot, 20,3,3)
             mat_dict  (dict): material parameters
             cmklij     (int): if 1: linear elastic, if 3: concrete, nonlinear
         Returns:
@@ -164,11 +179,6 @@ class SigSimulator:
         
         elif cm_klij == 3: 
             dp = np.zeros((n_tot, nl, 3, 3))
-            # TODO: Verstehen wie ET aufgebaut ist. Dann die Formulierung unten so ausbauen, dass es vektorisiert läuft...
-            # s shape: (n_tot, 20, 3)? -> nochmal die Ausgabe von s kontrollieren: Scheinen drei separate ausgaben zu sein für nichtlinear.
-            # s shape: (n_tot, 20, 3, 3)?
-            ET = np.array([[s[0][0].imag, s[1][0].imag, s[2][0].imag],
-                        [s[0][1].imag, s[1][1].imag, s[2][1].imag],
-                        [s[0][2].imag, s[1][2].imag, s[2][2].imag]])/0.0000000000000001
+            ET = s[:, :, :3, :3].imag / 1e-16
             
         return dp
