@@ -10,6 +10,8 @@ from simulating_sig_vec_RC3D import *
 
 
 SAMPLE_2D = False
+PLOT_D = True
+BATCHWISE = False
 
 
 ############################ 0 - Get constants ############################
@@ -43,18 +45,41 @@ else:
 ############################ 2 - Simulating stresses ############################
 
 simulatesig = SigSimulator(constants)
+cm = 3
 
-# 2.1 Find layer strains
-e = simulatesig.find_e_vec(eps_g)
+if not BATCHWISE:
 
-# 2.2 Find layer stresses
-s = simulatesig.find_s_vec(e, mat_dict)
+    # 2.1 Find layer strains
+    e = simulatesig.find_e_vec(eps_g)
 
-# 2.3 Find generalised stresses
-sig_g = simulatesig.find_sh_vec(s)
+    # 2.2 Find layer stresses
+    s = simulatesig.find_s_vec(e, mat_dict, cm_klij = cm)
 
-# 2.4 Find stiffnesses
-dh = simulatesig.find_dh_vec(s, mat_dict)
+    # 2.3 Find generalised stresses
+    sig_g = simulatesig.find_sh_vec(s, cm_klij = cm)
 
-# 2.5 Save generalised stresses
-save_3D_data(sig_g, save_data_dir, filename = 'sig_g')
+    # 2.4 Find stiffnesses
+    dh = simulatesig.find_dh_vec(s, mat_dict, cm_klij = cm)
+
+    # 2.5 Save generalised stresses
+    save_3D_data(sig_g, save_data_dir, filename = 'sig_g')
+
+else: 
+    sig_g, dh = sig_simulation_batchwise(eps_g, simulatesig, cm, mat_dict)
+
+    # 2.5 Save generalised stresses
+    save_3D_data(sig_g, save_data_dir, filename = 'sig_g')
+
+
+############################ 3 - Visualising stiffnesses ############################
+
+if PLOT_D:
+    save_plot_path = os.path.join(os.getcwd(), "sampling\\plots\\")
+    plot_filtered_stiffness(eps_g, dh, 0, save_plot_path)
+    imshow_D_filtered(eps_g, dh, 0, save_plot_path)
+
+    # for debugging:
+    # imshow_D_all(dh, save_plot_path)
+    # imshow_sig_eps_all(sig_g, eps_g, save_plot_path)
+
+

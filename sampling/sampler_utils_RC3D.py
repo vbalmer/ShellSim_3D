@@ -28,7 +28,7 @@ def get_constant_sampling_params(sample_2d:bool) -> tuple:
 
     c = {
         'n_samples_2D': 1e6, 
-        'n_samples_3D': 1e6,         #4e9,
+        'n_samples_3D': 1e6,         #4e9,47e3 (for 6 elements per dimension)
 
         'min': [-3e-3]*2 + [-4e-3],
         'max': [5e-3]*2  + [4e-3],
@@ -402,7 +402,7 @@ def save_3D_data(data_:np.array, save_dir:str, filename:str):
 
 
 
-########################################## Visualising ##########################################
+########################################## Visualising strains, stresses ##########################################
 
 def plot_3D_data(save_data_path, filename, n_every: int = int(1e3)):
     """
@@ -476,3 +476,153 @@ def figure_formatting(ax, i, filename):
             ax.set_xlabel('m_x')
             ax.set_ylabel('m_y')
             ax.set_zlabel('m_xy')
+
+
+########################################## Visualising stiffnesses ##########################################
+
+def plot_filtered_stiffness(data_eps, data_D, idx_eps, save_path):
+    """
+    Plots filtered versions of stiffness data
+
+    Args: 
+        data_eps    (np.arr):   to create the mask according to which the D-data is filtered, shape: (ntot, 6)
+        data_D      (np.arr):   data for plotting, shape: (ntot, 6,6)
+        idx_eps     (int):      Non-zero element of epsilon
+        save_path   (str):      Location where to save plot
+
+    Returns: 
+        plot containing idx_eps on x-axis and all corresponding stiffnesses on y-axis
+    """
+
+
+    # filter data
+    data_f_eps,mask = get_mask_strain(data_eps, idx_eps)
+    data_f_D = data_D[mask]
+
+    # sort data
+    data_s_eps, data_s_D = sort_data(data_f_eps, data_f_D, idx_eps)
+
+    # plot data
+    plot_data_stiffness(data_s_eps, data_s_D, idx_eps,save_path)
+
+    return
+
+def get_mask_strain(data_eps, idx_eps, tol = [0.5e-3, 0.5e-3, 0.9e-3, 0.4e-5, 0.4e-5, 0.4e-5]):
+    # tol for 6 points per direction: [0.5e-3, 0.5e-3, 1.6e-3, 0.5e-5, 0.5e-5, 0.7e-5]
+    tol = np.array(tol)
+    cols = np.arange(data_eps.shape[1])!=idx_eps
+    mask = np.all(np.abs(data_eps[:,cols])<tol[cols], axis =1)
+
+    data_f_eps = data_eps[mask]
+
+    print(f'After filtering data, {mask.sum()} datapoints are left.')
+    if mask.sum() < 1:
+        raise UserWarning('No datapoints found in given range. Please change the filtering tolerance.')
+
+    return data_f_eps, mask
+
+def sort_data(data_f_eps, data_f_D, idx_eps):
+    """
+    sorts data in ascending order according to idx_eps values
+
+    Args:
+        data_f_eps  (np.arr): filtered eps-data
+        data_f_D    (np.arr): filtered D-data
+        idx_eps     (int):    index for which to sort
+
+    """
+    data_s_eps = data_f_eps[np.argsort(data_f_eps[:, idx_eps])]
+    data_s_D = data_f_D[np.argsort(data_f_eps[:, idx_eps])]
+
+    return data_s_eps, data_s_D
+
+def plot_data_stiffness(data_s_eps, data_s_D, idx_eps, save_path):
+
+    fig, axs = plt.subplots(6,6, figsize = [30,20])
+
+    for i in range(6): 
+        for j in range(6): 
+            axs[i,j].plot(data_s_eps[:,idx_eps], data_s_D[:,i,j], marker = 'o')
+
+    figure_formatting_D(axs, idx_eps)
+
+    if save_path is not None: 
+        filename = 'filtered_dataset_D.png'
+        fig.savefig(os.path.join(save_path, filename))
+        print(f'Saved {filename} to {save_path}')
+
+
+    return
+
+def figure_formatting_D(axs, idx_eps):
+    names_D = np.array([['$D_{m,11}$', '$D_{m,12}$', '$D_{m,13}$', '$D_{mb,11}$', '$D_{mb,12}$', '$D_{mb,13}$'],
+                        ['$D_{m,21}$', '$D_{m,22}$', '$D_{m,23}$', '$D_{mb,21}$', '$D_{mb,22}$', '$D_{mb,23}$'],
+                        ['$D_{m,31}$', '$D_{m,32}$', '$D_{m,33}$', '$D_{mb,31}$', '$D_{mb,32}$', '$D_{mb,33}$'],
+                        ['$D_{bm,11}$', '$D_{bm,12}$', '$D_{bm,13}$', '$D_{b,11}$', '$D_{b,12}$', '$D_{b,13}$'],
+                        ['$D_{bm,21}$', '$D_{bm,22}$', '$D_{bm,23}$', '$D_{b,21}$', '$D_{b,22}$', '$D_{b,23}$'],
+                        ['$D_{bm,31}$', '$D_{bm,32}$', '$D_{bm,33}$', '$D_{b,31}$', '$D_{b,32}$', '$D_{b,33}$'],
+                        ])
+    names_eps = np.array(['$\\varepsilon_x$', '$\\varepsilon_y$', '$\\gamma_{xy}$', '$\\chi_x$', '$\\chi_y$', '$\\chi_{xy}$'])
+    
+    for i in range(6):
+        for j in range(6):
+            axs[i,j].set_ylabel(names_D[i,j])
+            axs[i,j].set_xlabel(names_eps[idx_eps])
+
+    return
+
+def imshow_D_filtered(data_eps, data_D, idx_eps, save_path): 
+    # filter data
+    data_f_eps,mask = get_mask_strain(data_eps, idx_eps)
+    data_f_D = data_D[mask]
+
+    # sort data
+    data_s_eps, data_s_D = sort_data(data_f_eps, data_f_D, idx_eps)
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    im = ax.imshow(data_s_D.reshape((-1,36)), aspect='auto', cmap='viridis', interpolation='nearest')
+    plt.colorbar(im, ax=ax)
+
+    if save_path is not None: 
+        filename = 'matrix_imshow.png'
+        fig.savefig(os.path.join(save_path, filename))
+        print(f'Saved {filename} to {save_path}')
+
+    return
+
+def imshow_D_all(dh, save_path):
+    fig1, ax1 = plt.subplots(figsize=(10, 8))
+    im1 = ax1.imshow(dh[:,:3,:3].reshape((-1,9)), aspect='auto', cmap='viridis', interpolation='nearest')
+    plt.colorbar(im1, ax=ax1)
+
+    fig2, ax2 = plt.subplots(figsize=(10, 8))
+    im2 = ax2.imshow(dh[:,3:6,3:6].reshape((-1,9)), aspect='auto', cmap='viridis', interpolation='nearest')
+    plt.colorbar(im2, ax=ax2)
+
+    if save_path is not None: 
+        filename1 = 'matrix_imshow_all_Dm.png'
+        fig1.savefig(os.path.join(save_path, filename1))
+        print(f'Saved {filename1} to {save_path}')
+
+        filename2 = 'matrix_imshow_all_Db.png'
+        fig2.savefig(os.path.join(save_path, filename2))
+        print(f'Saved {filename2} to {save_path}')
+
+    return
+
+
+def imshow_sig_eps_all(sig_g, eps_g, save_path):
+    data_ = [sig_g[:,:3], eps_g[:,:3], sig_g[:,3:6], eps_g[:,3:6]]
+    filenames_ = ['n_i', 'eps_i', 'm_i', 'chi_i']
+
+    for data, filename in zip (data_,filenames_):
+        fig1, ax1 = plt.subplots(figsize=(10, 8))
+        im1 = ax1.imshow(data, aspect='auto', cmap='viridis', interpolation='nearest')
+        plt.colorbar(im1, ax=ax1)
+
+        if save_path is not None: 
+            filename1 = 'matrix_imshow_all_'+filename+'.png'
+            fig1.savefig(os.path.join(save_path, filename1))
+            print(f'Saved {filename1} to {save_path}')
+
+    return

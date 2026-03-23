@@ -18,7 +18,8 @@ class ConstitutiveLaws():
     def __init__(self, e, constants, mat_dict, cm_klij = 3):
         # General
         self.cm_klij = cm_klij          # material type: 1 - lin.el., 3 - nonlinear RC
-        self.e = e                      # strain vector per layer, shape: (n_tot, nl, 3)
+        # self.e = e                      # strain vector per layer, shape: (n_tot, nl, 3)
+        self.e = e*cplx(np.ones_like(e),np.zeros_like(e))
 
         # Material parameters
         self.ect = mat_dict['ect']
@@ -394,21 +395,21 @@ class ConstitutiveLaws():
         Calculate linear elastic stresses
         '''
 
-        ex = self.e[:,:,0]
-        ey = self.e[:,:,1]
-        gxy = self.e[:,:,2]
+        ex = self.e[:,:,0:1]
+        ey = self.e[:,:,1:2]
+        gxy = self.e[:,:,2:3]
 
         E = self.Ec
         v = self.v
 
         sx_x = E/(1-v**2)*ex
         sx_y = E/(1-v**2)*v*ey
-        sx_xy = np.zeros_like(self.e[:,:,0])
+        sx_xy = np.zeros_like(self.e[:,:,0:1])
         sy_x = E/(1-v**2)*v*ex
         sy_y = E/(1-v**2)*ey
-        sy_xy = np.zeros_like(self.e[:,:,0])
-        txy_x = np.zeros_like(self.e[:,:,0])
-        txy_y = np.zeros_like(self.e[:,:,0])
+        sy_xy = np.zeros_like(self.e[:,:,0:1])
+        txy_x = np.zeros_like(self.e[:,:,0:1])
+        txy_y = np.zeros_like(self.e[:,:,0:1])
         txy_xy = E/(1-v**2)*(1-v)/2*gxy
 
         sx = sx_x + sx_y + sx_xy
@@ -576,12 +577,15 @@ class ConstitutiveLaws():
         -------------------------------------------------------------------------------------------------------------"""
 
         # 1 Assign Strain Values
-        ex = self.e[:,:,0:1]*cplx(np.ones_like(self.e[:,:,0:1]),np.zeros_like(self.e[:,:,1:2]))
-        ey = self.e[:,:,1:2]*cplx(np.ones_like(self.e[:,:,0:1]),np.zeros_like(self.e[:,:,1:2]))
-        gxy = self.e[:,:,2:3]*cplx(np.ones_like(self.e[:,:,0:1]),np.zeros_like(self.e[:,:,1:2]))
+        # ex = self.e[:,:,0:1]*cplx(np.ones_like(self.e[:,:,0:1]),np.zeros_like(self.e[:,:,1:2]))
+        # ey = self.e[:,:,1:2]*cplx(np.ones_like(self.e[:,:,0:1]),np.zeros_like(self.e[:,:,1:2]))
+        # gxy = self.e[:,:,2:3]*cplx(np.ones_like(self.e[:,:,0:1]),np.zeros_like(self.e[:,:,1:2]))
+        ex = self.e[:,:,0:1]
+        ey = self.e[:,:,1:2]
+        gxy= self.e[:,:,2:3]
 
         # 2 Calculate Stresses based on given constitutive model and strain state
-        e1, e3, th, submodel,_,_,_,_ = self.principal(ex, ey, gxy)
+        e1, _, _, submodel,_,_,_,_ = self.principal(ex, ey, gxy)
 
         if do_cracked == False:
             raise UserWarning('Not tested for do_cracked == False')

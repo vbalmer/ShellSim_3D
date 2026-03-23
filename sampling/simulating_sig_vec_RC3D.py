@@ -5,6 +5,8 @@
 import numpy as np
 import time
 
+import matplotlib.pyplot as plt
+
 from constitutive_laws import *
 
 # potentially all these functions need to be carried out in batched manner / on gpu.
@@ -48,7 +50,7 @@ class SigSimulator:
         return e
 
 
-    def find_s_vec(self, e, mat_dict, go = 1) -> np.array:
+    def find_s_vec(self, e, mat_dict, cm_klij=3, go = 1) -> np.array:
         """
         Vectorised version of Andreas' function find s for go = 1
         Args:
@@ -60,30 +62,49 @@ class SigSimulator:
         """
         t0 = time.perf_counter()
         # Entire file "Stresses_mixedreinf.py" in vectorised form
-        s = np.zeros((e.shape[0], e.shape[1], 3, 3), dtype=np.complex64)
 
-        e0 = e+np.array([0.0000000000000001j,0,0])
-        material_law0 = ConstitutiveLaws(e0, self.constants, mat_dict, cm_klij=3)
-        s[:,:,0,:] = material_law0.out().squeeze(-1)
-        t1 =(time.perf_counter()-t0)
-        print(f'Calculated 1/3 instance of layer stresses s in {t1/60:.2f} min.')
+        if cm_klij == 3:
+            # Reinforced Concrete Calculation
+            s = np.zeros((e.shape[0], e.shape[1], 3, 3), dtype=np.complex64)
 
-        e1 = e+np.array([0,0.0000000000000001j,0])
-        material_law1 = ConstitutiveLaws(e1, self.constants, mat_dict, cm_klij=3)
-        s[:,:,1,:] = material_law1.out().squeeze(-1)
-        t2 =(time.perf_counter()-t0)
-        print(f'Calculated 2/3 instance of layer stresses s in {t2/60:.2f} min.')
+            e0 = e+np.array([0.0000000000000001j,0,0])
+            material_law0 = ConstitutiveLaws(e0, self.constants, mat_dict, cm_klij=cm_klij)
+            s[:,:,0,:] = material_law0.out().squeeze(-1)
+            t1 =(time.perf_counter()-t0)
+            print(f'Calculated 1/3 instance of layer stresses s in {t1/60:.2f} min.')
 
-        e2 = e+np.array([0,0,0.0000000000000001j])
-        material_law2 = ConstitutiveLaws(e2, self.constants, mat_dict, cm_klij=3)
-        s[:,:,2,:] = material_law2.out().squeeze(-1)
-        t3 =(time.perf_counter()-t0)
-        print(f'Calculated 3/3 instance of layer stresses s in {t3/60:.2f} min.')
+
+            e1 = e+np.array([0,0.0000000000000001j,0])
+            material_law1 = ConstitutiveLaws(e1, self.constants, mat_dict, cm_klij=cm_klij)
+            s[:,:,1,:] = material_law1.out().squeeze(-1)
+            t2 =(time.perf_counter()-t0)
+            print(f'Calculated 2/3 instance of layer stresses s in {t2/60:.2f} min.')
+
+            e2 = e+np.array([0,0,0.0000000000000001j])
+            material_law2 = ConstitutiveLaws(e2, self.constants, mat_dict, cm_klij=cm_klij)
+            s[:,:,2,:] = material_law2.out().squeeze(-1)
+            t3 =(time.perf_counter()-t0)
+            print(f'Calculated 3/3 instance of layer stresses s in {t3/60:.2f} min.')
+
+            # for debugging:
+            # fig1, ax1 = plt.subplots(figsize=(10, 8))
+            # im1 = ax1.imshow(s.imag.reshape((s.shape[0],180)), aspect='auto', cmap='viridis', interpolation='nearest')
+            # plt.colorbar(im1, ax=ax1)
+            # plt.show()
+
+        elif cm_klij == 1: 
+            # Linear Elastic calculation
+            s = np.zeros((e.shape[0], e.shape[1], 3), dtype = np.float32)
+            material_law0 = ConstitutiveLaws(e, self.constants, mat_dict, cm_klij=cm_klij)
+            s = material_law0.out().real
+            t1 =(time.perf_counter()-t0)
+            print(f'Calculated linear elastic layer stresses s in {t1/60:.2f} min.')
+
 
         return s
 
 
-    def find_sh_vec(self, s, go = 1) -> np.array:
+    def find_sh_vec(self, s, cm_klij = 3, go = 1) -> np.array:
         """
         Vectorised version of Andreas' function find sh for go = 1
 
@@ -108,8 +129,11 @@ class SigSimulator:
             np.broadcast_to(Z,  (n_tot, nl, 3, 3))],
             axis=-1)                                            
         
-        s = s[:,:,0,:].reshape(n_tot, nl, 3, 1)                  # shape (n_tot, nl, 3, 1)
-        s = s.real
+        if cm_klij == 3:
+            s = s[:,:,0,:].reshape(n_tot, nl, 3, 1)     # shape (n_tot, nl, 3, 1)
+            s = s.real
+        elif cm_klij == 1:
+            s = s.reshape(n_tot, nl, 3, 1)              # shape (n_tot, nl, 3, 1)
 
         sh = (S.transpose(0,1,3,2)@s).squeeze(-1)       # shape (n_tot, nl, 6)
 
@@ -120,7 +144,7 @@ class SigSimulator:
         return sh
 
 
-    def find_dh_vec(self, s, mat_dict, go = 1) -> np.array:
+    def find_dh_vec(self, s, mat_dict, cm_klij = 3, go = 1) -> np.array:
         """
         Vectorised version of Andreas' function find dh for go = 1
         Args:
@@ -136,17 +160,17 @@ class SigSimulator:
         l = np.arange(nl)                               # shape (nl,)
         z = -t / 2 + (2 * l + 1) * t / (2 * nl)         # shape (nl,)
 
-        Dmh = np.zeros((s.shape[0],3,3))
-        Dbh = np.zeros((s.shape[0],3,3))
-        Dmbh = np.zeros((s.shape[0],3,3))
+        # Dmh = np.zeros((s.shape[0],3,3))
+        # Dbh = np.zeros((s.shape[0],3,3))
+        # Dmbh = np.zeros((s.shape[0],3,3))
 
-        Dp = self.get_et(s, mat_dict, cm_klij = 3)       # shape (n_tot, 20, 3, 3)
+        Dp = self.get_et(s, mat_dict, cm_klij = cm_klij)       # shape (n_tot, 20, 3, 3)
 
         z_ = z.reshape(1, -1, 1, 1)
 
-        Dmh     += np.sum((Dp)       *t/nl)               # shape (n_tot, 3, 3)
-        Dmbh    += np.sum((-z_*Dp)    *t/nl)               # shape (n_tot, 3, 3)
-        Dbh     += np.sum((z_**2*Dp)  *t/nl)               # shape (n_tot, 3, 3)
+        Dmh     = np.sum((Dp)       , axis = 1)*t/nl               # shape (n_tot, 3, 3)
+        Dmbh    = np.sum((-z_*Dp)   , axis = 1)*t/nl                # shape (n_tot, 3, 3)
+        Dbh     = np.sum((z_**2*Dp) , axis = 1)*t/nl                # shape (n_tot, 3, 3)
 
         De_1 = np.concatenate([Dmh, Dmbh], axis=2)          # (n_tot, 3, 6)
         De_2 = np.concatenate([Dmbh, Dbh], axis=2)          # (n_tot, 3, 6)
@@ -157,7 +181,7 @@ class SigSimulator:
         return De
     
 
-    def get_et(self, s, mat_dict, cm_klij = 1) -> np.array:
+    def get_et(self, s, mat_dict, cm_klij = 3) -> np.array:
         """
         Calculates per-layer stiffness matrix
         Args:
@@ -178,7 +202,60 @@ class SigSimulator:
             dp = np.broadcast_to(ET[np.newaxis, np.newaxis,:,:], (n_tot, nl, 3,3))
         
         elif cm_klij == 3: 
-            dp = np.zeros((n_tot, nl, 3, 3))
-            ET = s[:, :, :3, :3].imag / 1e-16
+            ET = s.imag / 1e-16
+            dp = ET
+
+
+            # for debugging:
+            # fig1, ax1 = plt.subplots(figsize=(10, 8))
+            # im1 = ax1.imshow(ET.reshape((s.shape[0],180)), aspect='auto', cmap='viridis', interpolation='nearest')
+            # plt.colorbar(im1, ax=ax1)
+            # plt.show()
             
         return dp
+    
+
+# batchwise calculations - wrapper
+
+def sig_simulation_batchwise(eps_g, simulatesig, cm, mat_dict, n_batches = 500):
+    """
+    Executes batch-wise calculation of sig_g (as opposed to full-batch)
+    Args:
+        eps_g           (np.arr)        : Sampled epsilon (ntot,6)
+        simulatesig     (SigSimulator)  : Simulator class
+        cm              (int)           : Material model (1 = Lin.el., 3 = RC)
+        mat_dict        (dict)          : Material properties
+        n_batches       (int)           : Amount of batches
+
+    Returns:
+        sig_g           (np.arr)        : Simulated sig (ntot, 6)
+        dh              (np.arr)        : Simulated D   (ntot, 6,6)
+    
+    """
+    sig_g = np.zeros_like(eps_g)
+    dh = np.zeros((eps_g.shape[0],6,6))
+    batch_size = int(eps_g.shape[0]/n_batches)
+    
+
+    for i in range(n_batches):
+        # 2.0 Define batch 
+        start = i*batch_size
+        end = (i+1)*batch_size-1
+        eps_g_batch = eps_g[start:end,:]
+
+        # 2.1 Find layer strains
+        e = simulatesig.find_e_vec(eps_g_batch)
+
+        # 2.2 Find layer stresses
+        s = simulatesig.find_s_vec(e, mat_dict, cm_klij = cm)
+
+        # 2.3 Find generalised stresses
+        sig_g_batch = simulatesig.find_sh_vec(s, cm_klij = cm)
+
+        # 2.4 Find stiffnesses
+        dh_batch = simulatesig.find_dh_vec(s, mat_dict, cm_klij = cm)
+
+        sig_g[start:end,:] = sig_g_batch
+        dh[start:end,:] = dh_batch
+    
+    return sig_g, dh
