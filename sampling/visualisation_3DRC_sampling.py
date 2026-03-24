@@ -8,7 +8,7 @@ from sampler_utils_RC3D import *
 
 save_data_dir = os.path.join('D:\\', 'VeraBalmer\\ShellSim3D')
 save_data_path = os.path.join(save_data_dir, 'output_eps_g.h5')
-plot_3D_data(save_data_path, filename = 'scatter_eps_g', n_every = int(1))
+plot_3D_data(save_data_path, filename = 'scatter_eps_g', n_every = int(10))
 
 # TODO?
 # visualisation of stress distributions across the height of the cross section?
@@ -17,4 +17,4 @@ plot_3D_data(save_data_path, filename = 'scatter_eps_g', n_every = int(1))
 
 save_data_dir = os.path.join('D:\\', 'VeraBalmer\\ShellSim3D')
 save_data_path = os.path.join(save_data_dir, 'output_sig_g.h5')
-plot_3D_data(save_data_path, filename = 'scatter_sig_g', n_every = int(1))
+plot_3D_data(save_data_path, filename = 'scatter_sig_g', n_every = int(10))

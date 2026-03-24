@@ -3,7 +3,9 @@
 
 
 import os
-import numpy as np
+import config
+import cupy as cp
+config.USE_GPU = True
 
 from sampler_utils_RC3D import *
 from simulating_sig_vec_RC3D import *
@@ -11,7 +13,8 @@ from simulating_sig_vec_RC3D import *
 
 SAMPLE_2D = False
 PLOT_D = True
-BATCHWISE = False
+BATCHWISE = True
+
 
 
 ############################ 0 - Get constants ############################
@@ -65,7 +68,7 @@ if not BATCHWISE:
     save_3D_data(sig_g, save_data_dir, filename = 'sig_g')
 
 else: 
-    sig_g, dh = sig_simulation_batchwise(eps_g, simulatesig, cm, mat_dict)
+    sig_g, dh = sig_simulation_batchwise(cp.asarray(eps_g), simulatesig, cm, mat_dict, n_batches = 64)
 
     # 2.5 Save generalised stresses
     save_3D_data(sig_g, save_data_dir, filename = 'sig_g')

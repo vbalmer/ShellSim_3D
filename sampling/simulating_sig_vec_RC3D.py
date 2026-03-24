@@ -1,13 +1,23 @@
 # vectorised version of stress simulator of Andreas
 # vb, 10.03.2026
 
+import config                       # for utilisation of GPU
+from constitutive_laws import *
+import sys
+import os
 
-import numpy as np
+if config.USE_GPU:
+    import cupy as np
+    import numpy as np_
+    print(f'Imported {np.__name__} as np')
+    print(f'Imported {np_.__name__} as np_')
+else:
+    import numpy as np
+    np_ = np
+    print(f'Imported {np.__name__} as np')
 import time
-
 import matplotlib.pyplot as plt
 
-from constitutive_laws import *
 
 # potentially all these functions need to be carried out in batched manner / on gpu.
 
@@ -215,9 +225,18 @@ class SigSimulator:
         return dp
     
 
-# batchwise calculations - wrapper
+######################### batchwise calculations - wrapper #########################
 
-def sig_simulation_batchwise(eps_g, simulatesig, cm, mat_dict, n_batches = 500):
+class HiddenPrints:
+    def __enter__(self):
+        self._original_stdout = sys.stdout
+        sys.stdout = open(os.devnull, 'w')
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout.close()
+        sys.stdout = self._original_stdout
+
+def sig_simulation_batchwise(eps_g, simulatesig:SigSimulator, cm, mat_dict, n_batches = 500):
     """
     Executes batch-wise calculation of sig_g (as opposed to full-batch)
     Args:
@@ -232,30 +251,46 @@ def sig_simulation_batchwise(eps_g, simulatesig, cm, mat_dict, n_batches = 500):
         dh              (np.arr)        : Simulated D   (ntot, 6,6)
     
     """
-    sig_g = np.zeros_like(eps_g)
-    dh = np.zeros((eps_g.shape[0],6,6))
+    sig_g = np_.zeros((eps_g.shape[0], 6))
+    dh = np_.zeros((eps_g.shape[0],6,6))
     batch_size = int(eps_g.shape[0]/n_batches)
     
-
+    t00 = time.perf_counter()
     for i in range(n_batches):
-        # 2.0 Define batch 
-        start = i*batch_size
-        end = (i+1)*batch_size-1
-        eps_g_batch = eps_g[start:end,:]
+        if i%10 != 0:
+            with HiddenPrints():
+                sig_g, dh,_ = single_batch_execution(i, batch_size, simulatesig, mat_dict, cm, dh, sig_g, eps_g)
 
-        # 2.1 Find layer strains
-        e = simulatesig.find_e_vec(eps_g_batch)
+        else:
+            sig_g, dh,t0 = single_batch_execution(i, batch_size, simulatesig, mat_dict, cm, dh, sig_g, eps_g)
+            t_batch = time.perf_counter() - t0
+            if i%10 == 0:
+                print(f'Finished batch {i+1}/{n_batches} with batchsize = {batch_size} in {t_batch/60:.2f} min.')
 
-        # 2.2 Find layer stresses
-        s = simulatesig.find_s_vec(e, mat_dict, cm_klij = cm)
-
-        # 2.3 Find generalised stresses
-        sig_g_batch = simulatesig.find_sh_vec(s, cm_klij = cm)
-
-        # 2.4 Find stiffnesses
-        dh_batch = simulatesig.find_dh_vec(s, mat_dict, cm_klij = cm)
-
-        sig_g[start:end,:] = sig_g_batch
-        dh[start:end,:] = dh_batch
-    
+    print(f'Finished calculation of all {n_batches} batches in {(time.perf_counter()-t00)/60:.2f} min')
     return sig_g, dh
+
+def single_batch_execution(i:int, batch_size: int, simulatesig:SigSimulator, mat_dict, cm, dh, sig_g, eps_g):
+    t0 = time.perf_counter()
+
+    # 2.0 Define batch 
+    start = i*batch_size
+    end = (i+1)*batch_size
+    eps_g_batch = eps_g[start:end,:]
+
+    # 2.1 Find layer strains
+    e = simulatesig.find_e_vec(eps_g_batch)
+
+    # 2.2 Find layer stresses
+    s = simulatesig.find_s_vec(e, mat_dict, cm_klij = cm)
+
+    # 2.3 Find generalised stresses
+    sig_g_batch = simulatesig.find_sh_vec(s, cm_klij = cm)
+
+    # 2.4 Find stiffnesses
+    dh_batch = simulatesig.find_dh_vec(s, mat_dict, cm_klij = cm)
+
+    sig_g[start:end,:] = sig_g_batch.get().astype(sig_g.dtype)
+    dh[start:end,:] = dh_batch.get().astype(dh.dtype)
+
+    return sig_g, dh, t0

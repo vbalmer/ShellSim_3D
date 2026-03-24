@@ -9,7 +9,11 @@
 #       cmtn_klij = None (not required here)
 
 
-import numpy as np
+import config
+if config.USE_GPU:
+    import cupy as np
+else:
+    import numpy as np
 from defcplx_np import *
 from defcplx_np import cplx
 
@@ -388,7 +392,6 @@ class ConstitutiveLaws():
 
 
     ''' -------------------------------------COMBINED IN-PLANE STATES-------------------------------------'''
-
 
     def sigma_cart_1(self):
         '''

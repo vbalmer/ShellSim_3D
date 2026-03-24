@@ -1,4 +1,8 @@
-import numpy as np
+import config
+if config.USE_GPU:
+    import cupy as np
+else:
+    import numpy as np
 
 lbd = 0.67
 
