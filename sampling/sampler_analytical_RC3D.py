@@ -13,6 +13,7 @@ from simulating_sig_vec_RC3D import *
 
 SAMPLE_2D = False
 PLOT_D = True
+SAVE_D = True
 BATCHWISE = True
 
 
@@ -68,7 +69,7 @@ if not BATCHWISE:
     save_3D_data(sig_g, save_data_dir, filename = 'sig_g')
 
 else: 
-    sig_g, dh = sig_simulation_batchwise(cp.asarray(eps_g), simulatesig, cm, mat_dict, n_batches = 64)
+    sig_g, dh = sig_simulation_batchwise(cp.asarray(eps_g), simulatesig, cm, mat_dict, n_batches = 1)
 
     # 2.5 Save generalised stresses
     save_3D_data(sig_g, save_data_dir, filename = 'sig_g')
@@ -86,3 +87,5 @@ if PLOT_D:
     # imshow_sig_eps_all(sig_g, eps_g, save_plot_path)
 
 
+if SAVE_D: 
+    save_3D_data(dh, save_data_dir, filename = 'D')

@@ -28,7 +28,7 @@ def get_constant_sampling_params(sample_2d:bool) -> tuple:
 
     c = {
         'n_samples_2D': 1e6, 
-        'n_samples_3D': 64e6,         #4e9,47e3 (for 6 elements per dimension)
+        'n_samples_3D': 1e6,         #4e9,47e3 (for 6 elements per dimension), 64e6 (20 elements per dimension)
 
         'min': [-3e-3]*2 + [-4e-3],
         'max': [5e-3]*2  + [4e-3],
