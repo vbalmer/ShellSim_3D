@@ -13,16 +13,9 @@ inp = {
     'lr_scheduler':'standard',                      # 'standard': the one used by mike; 'plateau': reduceLRonPlateau
     'dropout_rate': 0,
     'BatchNorm': False,
-    'kfold': False, 
     'num_samples': 5, 
     'fourier_mapping': False,  
-    'loss_type': 'MSELoss',                         # can be 'MSELoss', 'HuberLoss', 'MSLELoss', 'wMSELoss', 'RMSELoss'
-    'Split_Loss': False,                            # whether loss should be split into m, b, s
-    'w_mbs': [0.1, 0.8, 0.1],                       # weights [wm, wb, ws] (neglected if Split_loss = false)
-    'w_Dmbs':[0.4, 0.2, 0.4] ,                      # weights [wDm, wDb, wDs] (neglected if Split_loss = false)
-
-    # Training type
-    'simple_m': True,                               # this should always be set to True.                         
+    'loss_type': 'MSELoss',                         # can be 'MSELoss', 'HuberLoss', 'MSLELoss', 'wMSELoss', 'RMSELoss'                   
 
     # Network type (Sobolev, Pretrained, DeepONet, MoE)          
     'w_s': str([0.9,0.1]),                          # weights [w1, w2] for 1st, 2nd order loss with sobolev (neglected if sobolev = False), or 'max'
