@@ -104,19 +104,19 @@ def split_data(features, labels, test_size = 0.1, eval_size = 0.2):
 
     return train_eval_test_data
 
-def plot_split_data(data):
+def plot_split_data(data:dict, plot:bool):
     """
     Creates 6 plots for 6 subdatasets: 
     - train, test, eval
     - eps and sig
     """
-    
-    plot_3D_data(data['X_train'][:,:6], 'train_scatter_eps_g')
-    plot_3D_data(data['X_eval'][:,:6], 'eval_scatter_eps_g')
-    plot_3D_data(data['X_test'][:,:6], 'test_scatter_eps_g')
-    plot_3D_data(data['y_train'][:,:6], 'train_scatter_sig_g')
-    plot_3D_data(data['y_eval'][:,:6], 'eval_scatter_sig_g')
-    plot_3D_data(data['y_test'][:,:6], 'test_scatter_sig_g')
+    if plot:
+        plot_3D_data(data['X_train'][:,:6], 'train_scatter_eps_g')
+        plot_3D_data(data['X_eval'][:,:6], 'eval_scatter_eps_g')
+        plot_3D_data(data['X_test'][:,:6], 'test_scatter_eps_g')
+        plot_3D_data(data['y_train'][:,:6], 'train_scatter_sig_g')
+        plot_3D_data(data['y_eval'][:,:6], 'eval_scatter_sig_g')
+        plot_3D_data(data['y_test'][:,:6], 'test_scatter_sig_g')
   
     return
 
@@ -146,14 +146,15 @@ def get_normalised_data(data: dict, stats: dict, sobolev: bool) -> dict:
 
     Args: 
         data        (dict): datset split in train, eval and test (features and labels), i.e. 6 arrays in mat.
+        stats       (dict): statistics for normalisation. only train statistics used.
         sobolev     (bool): True if stiffness data is also included in labels.
     
     Returns: 
-        stats       (dict): normalised dataset 
+        normalised_data (dict): normalised dataset 
     """
 
-    xdim = data['X_train'].shape[1]         # 6+GEOM_SIZE
-    ydim = data['y_train'].shape[1]         # 6 or 6+36 depending on SOBOLEV
+    xdim = data['X_test'].shape[1]         # 6+GEOM_SIZE
+    ydim = data['y_test'].shape[1]         # 6 or 6+36 depending on SOBOLEV
     if sobolev:
         norm_type_x = ['x-std']*xdim
         norm_type_y = ['y-std']*ydim
@@ -285,12 +286,13 @@ def transform_data(data:np.array, stats_:dict, forward: bool, type: list):
 
     return new_data
 
-def plot_norm_data(data: dict):
+def plot_norm_data(data: dict, plot: bool):
     """
     Plot normalised training dataset for sigma.
     """
-    plot_3D_data(data['X_train_t'][:,:6], 'train_norm_scatter_eps_g')
-    plot_3D_data(data['y_train_t'][:,:6], 'train_norm_scatter_sig_g')
+    if plot:
+        plot_3D_data(data['X_train_t'][:,:6], 'train_norm_scatter_eps_g')
+        plot_3D_data(data['y_train_t'][:,:6], 'train_norm_scatter_sig_g')
     return
 
 def data_to_torch(data: dict) -> dict:

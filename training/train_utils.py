@@ -73,7 +73,7 @@ def main_train(data: dict, save_path: str, config = None, project_name = 'ShellS
 
     return inp
 
-def training_wrapper(data:dict, inp: dict, save_path:str, save_folder:str, sweep: bool) -> None:
+def training_wrapper(data:dict, inp: dict, save_path:str, save_folder:str, sweep: bool, test_only:bool) -> None:
     """
     Wrapper around main train function, depending on whether to include sweep or not
 
@@ -83,32 +83,37 @@ def training_wrapper(data:dict, inp: dict, save_path:str, save_folder:str, sweep
         save_path    (str): location where intermediate data is saved
         save_folder (bool): If true, save resulting trained models in folder.
         sweep       (bool): If true: carries out hyperparameter sweep
+        test_only   (bool): If true: skipps entire training and goes directly to testing.
 
     Returns: 
         Trained model saved in save_path.
     
     """
-    if not sweep:
-        #_______________________________________
-        # Call function to train without sweep
-        # _______________________________________
-        inp_ = inp
-        inp = main_train(data, save_path, config = inp_, project_name = 'ShellSim3D', save_folder = save_folder)
-
-    elif sweep:
-        #________________________________________
-        # Call function to train with sweep
-        # ______________________________________
-        raise UserWarning('This part of the code has not yet been debugged in the new version.')
+    if test_only: 
+        print('Not training any model, just testing.')
     
-        # Define sweep configuration
-        from config_inp import sweep_config
+    else:
+        if not sweep:
+            #_______________________________________
+            # Call function to train without sweep
+            # _______________________________________
+            inp_ = inp
+            inp = main_train(data, save_path, config = inp_, project_name = 'ShellSim3D', save_folder = save_folder)
 
-        # start sweep
-        sweep_id = wandb.sweep(sweep = sweep_config, project='ShellSim3D_sweep')
-        wandb.agent(sweep_id, 
-                    function= lambda: main_train(data = data, save_path = save_path),
-                    count = 1)
+        elif sweep:
+            #________________________________________
+            # Call function to train with sweep
+            # ______________________________________
+            raise UserWarning('This part of the code has not yet been debugged in the new version.')
+        
+            # Define sweep configuration
+            from config_inp import sweep_config
+
+            # start sweep
+            sweep_id = wandb.sweep(sweep = sweep_config, project='ShellSim3D_sweep')
+            wandb.agent(sweep_id, 
+                        function= lambda: main_train(data = data, save_path = save_path),
+                        count = 1)
         
     return
 
