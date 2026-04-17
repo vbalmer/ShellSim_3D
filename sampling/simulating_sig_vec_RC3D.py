@@ -1,12 +1,17 @@
 # vectorised version of stress simulator of Andreas
 # vb, 10.03.2026
 
-import config                       # for utilisation of GPU
-from constitutive_laws import *
 import sys
 import os
 
-if config.USE_GPU:
+try:
+    from .config import USE_GPU                       # for utilisation of GPU
+    from .constitutive_laws import *
+except ImportError:
+    from config import USE_GPU
+    from constitutive_laws import *
+
+if USE_GPU:
     import cupy as np
     import numpy as np_
     print(f'Imported {np.__name__} as np')

@@ -9,8 +9,11 @@ import h5py
 
 import matplotlib.pyplot as plt
 
+try:
+    from .concrete_classes import dict_CC
+except ImportError:
+    from concrete_classes import dict_CC
 
-from concrete_classes import dict_CC
 
 ########################################## Sampling strains ##########################################
 

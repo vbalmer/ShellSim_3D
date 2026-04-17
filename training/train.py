@@ -56,6 +56,7 @@ inp['Sobolev'] = SOBOLEV
 constant_inp['Sobolev'] = SOBOLEV
 
 save_inp(inp)
+save_stats(stats)
 
 
 ############################ 4 - Train              ############################

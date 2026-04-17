@@ -64,7 +64,7 @@ def main_train(data: dict, save_path: str, config = None, project_name = 'ShellS
         model.eval()
 
         # Copy model and data to separate folder.
-        filenames = ['inp.pkl', 'last_trained_model.pt', 'best_trained_model.pt']
+        filenames = ['inp.pkl', 'stats.pkl', 'last_trained_model.pt', 'best_trained_model.pt']
 
         if save_folder:
             src_folder = os.path.join(os.getcwd(), 'training\\config')
@@ -402,11 +402,22 @@ def model_print(model_dict:dict) -> None:
 
 def save_inp(inp: dict, save_path = 'training\\config'):
     """
-    saving inp file for use in testing
+    saving inp file for use in testing / later inference
     """
 
     with open(os.path.join(save_path, 'inp.pkl'), 'wb') as fp:
             pickle.dump(inp, fp)
+    return
+
+
+def save_stats(stats:dict, save_path = 'training\\config'):
+    """
+    saving stats file for use in testing / later inference 
+    """
+
+    with open(os.path.join(save_path, 'stats.pkl'), 'wb') as fp:
+            pickle.dump(stats, fp)
+
     return
 
 def set_torch_params():

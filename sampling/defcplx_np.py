@@ -1,5 +1,11 @@
-import config
-if config.USE_GPU:
+
+try:
+    from .config import USE_GPU
+except ImportError:
+    from config import USE_GPU
+
+    
+if USE_GPU:
     import cupy as np
 else:
     import numpy as np

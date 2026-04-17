@@ -8,14 +8,20 @@
 #       cms_klij = 1 (tension chord model with bilinear bare relationship)
 #       cmtn_klij = None (not required here)
 
+try:
+    from .config import USE_GPU
+    from .defcplx_np import *
+    from .defcplx_np import cplx
+except ImportError:
+    from config import USE_GPU
+    from defcplx_np import *
+    from defcplx_np import cplx
 
-import config
-if config.USE_GPU:
+if USE_GPU:
     import cupy as np
 else:
     import numpy as np
-from defcplx_np import *
-from defcplx_np import cplx
+
 
 
 class ConstitutiveLaws():
