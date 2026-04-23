@@ -2,8 +2,10 @@
 
 import os
 import glob
+import re
 from pathlib import Path
 import pickle
+import shutil
 
 import torch
 from torch.utils.data import TensorDataset, DataLoader
@@ -29,8 +31,8 @@ def test_NN_model(test_data: dict, stats: dict, save_path: str, version: int,
     Data and stats are passed directly from train file. 
 
     Args: 
-        test_data  (dict): test_data (from train script)
-        stats      (dict): Statistics (from train script). Only train statistics will be used for normalisation
+        test_data  (dict): test_data (from train script / from saved folder)
+        stats      (dict): Statistics (from train script / from saved folder). Only train statistics will be used for normalisation
         save_path   (str): location where trained model is saved
         version     (int): version of trained model to look for
 
@@ -40,6 +42,8 @@ def test_NN_model(test_data: dict, stats: dict, save_path: str, version: int,
     """
 
     ## 0 - Create test model instance
+    if version == None: 
+        version = get_latest_version(save_path)    
     inp = get_inp_from_folder(save_path, version)
     test_model = test_model_instance(inp, save_path, version)
 
@@ -69,7 +73,9 @@ def test_NN_model(test_data: dict, stats: dict, save_path: str, version: int,
     # 4b - Transformed data (no unit transformation required)
     multiple_diagonal_plots_D(plot_data_D['labels'], plot_data_D['pred'],
                               stats, 'rse', plot_path, transf = 'u')
-
+    
+    ## 5 - Copy figures to corresponding version folder
+    copy_figures(plot_path, [save_path, version]) 
 
 
     return
@@ -110,6 +116,19 @@ def test_model_instance(inp:dict, path:str, version:int) -> FFNN:
 
     return model_test
 
+def get_latest_version(path: str):
+
+    folder_path = os.path.join(os.getcwd(), path)
+    versions = []
+    for name in os.listdir(folder_path):
+        match = re.match(r'v_(\d+)$', name)
+        if match:
+            versions.append(int(match.group(1)))
+        
+    print(f'No version number entered in input. Testing latest available version {int(max(versions))}')
+
+    return int(max(versions)) if versions else None
+
 def get_full_model_path(path:str, version:int):
     """
     Extract correct "best_trained_model_xx.pt" file from given version folder
@@ -133,6 +152,27 @@ def get_full_model_path(path:str, version:int):
     print(f'Testing model v_{version} with best trained model at epoch {epoch}')
 
     return model_path
+
+def get_testdata_from_folder(path:str, version: int):
+    """
+    get test data from given folder
+
+    Args: 
+        path    (str): location where test data and model is saved
+        version (int): version number of to be tested model
+    """
+    
+    full_path = os.path.join(path, 'v_'+str(version))
+    with open(os.path.join(full_path, 'test_data.pkl'),'rb') as handle:
+        test_data = pickle.load(handle)
+
+    return test_data
+
+def get_stats_from_folder(path:str, version:int):
+    full_path = os.path.join(path, 'v_'+str(version))
+    with open(os.path.join(full_path, 'stats.pkl'),'rb') as handle:
+        stats = pickle.load(handle)
+    return stats
 
 
 def predict_sig(test_model:FFNN, inp:dict, test_data:dict, stats:dict, sobolev:bool):
@@ -194,10 +234,11 @@ def get_normalised_sig_pred(inp:dict, data:dict, test_model: FFNN) -> torch.Tens
     test_loader = DataLoader(test_dataset, batch_size = batch_size_test, shuffle = False)
 
     pred_norm = []
-    for (X_test_tt, ) in test_loader:
-        preds = test_model(X_test_tt)
-        pred_norm.append(preds)
-    pred_norm = torch.cat(pred_norm, dim = 0)
+    with torch.no_grad():
+        for (X_test_tt, ) in test_loader:
+            preds = test_model(X_test_tt)
+            pred_norm.append(preds.detach())
+        pred_norm = torch.cat(pred_norm, dim = 0)
 
     return pred_norm
 
@@ -604,7 +645,15 @@ def save_diag_figure(save_path, transf, filename = 'multi_diag_scatter', id = No
 
     return
 
-
+def copy_figures(src_folder, copy_path):
+    dst_folder = os.path.join(os.getcwd(), copy_path[0]+'\\v_'+str(copy_path[1]))
+    plots_dir = os.path.join(dst_folder, "plots")
+    os.makedirs(plots_dir, exist_ok=True)
+    
+    for file in os.listdir(src_folder):
+        if file.endswith(('.png', '.jpg', '.jpeg', '.pdf', '.svg')):
+            shutil.copy2(os.path.join(src_folder, file), plots_dir)
+    print(f'Copied figures to {dst_folder}.')
 
 ################################ auxiliary functions for plotting stiffnesses ################################
 

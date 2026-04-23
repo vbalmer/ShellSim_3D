@@ -16,7 +16,6 @@ SAVE_FOLDER = True
 SWEEP = False
 SOBOLEV = True
 GEOM_SIZE = 0           # [t, rho_x, rho_y, CC]
-TEST_ONLY = True        # if True: only carries out testing. Seeding allows for same train-test-split.
 PLOT_DATA = False
 
 
@@ -57,13 +56,14 @@ constant_inp['Sobolev'] = SOBOLEV
 
 save_inp(inp)
 save_stats(stats)
+save_test_data(train_eval_test_data)
 
 
 ############################ 4 - Train              ############################
 
 training_wrapper(torch_data,  inp, 
                  save_path = 'training\\config', 
-                 save_folder = SAVE_FOLDER, sweep = SWEEP, test_only = TEST_ONLY)
+                 save_folder = SAVE_FOLDER, sweep = SWEEP)
 
 
 ############################ 5 - Test              ############################
@@ -72,4 +72,4 @@ test_data = {'X_test': train_eval_test_data['X_test'],
              'y_test': train_eval_test_data['y_test']}
 
 test_NN_model(test_data, stats,
-              save_path = 'training\\logs', version = 1)
+              save_path = 'training\\logs', version = None)

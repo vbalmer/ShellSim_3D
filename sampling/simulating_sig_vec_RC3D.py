@@ -3,6 +3,7 @@
 
 import sys
 import os
+import wandb
 
 try:
     from .config import USE_GPU                       # for utilisation of GPU
@@ -299,3 +300,9 @@ def single_batch_execution(i:int, batch_size: int, simulatesig:SigSimulator, mat
     dh[start:end,:] = dh_batch.get().astype(dh.dtype)
 
     return sig_g, dh, t0
+
+def initialise_wandb(constants, mat_dict, logwandb):
+    if logwandb: 
+        config_ = {**constants, **mat_dict}
+        wandb.init(config=config_, project='sampler_3DRC')
+    return 

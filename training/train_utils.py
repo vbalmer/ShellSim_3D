@@ -64,7 +64,7 @@ def main_train(data: dict, save_path: str, config = None, project_name = 'ShellS
         model.eval()
 
         # Copy model and data to separate folder.
-        filenames = ['inp.pkl', 'stats.pkl', 'last_trained_model.pt', 'best_trained_model.pt']
+        filenames = ['inp.pkl', 'stats.pkl', 'last_trained_model.pt', 'best_trained_model.pt', 'test_data.pkl']
 
         if save_folder:
             src_folder = os.path.join(os.getcwd(), 'training\\config')
@@ -73,7 +73,7 @@ def main_train(data: dict, save_path: str, config = None, project_name = 'ShellS
 
     return inp
 
-def training_wrapper(data:dict, inp: dict, save_path:str, save_folder:str, sweep: bool, test_only:bool) -> None:
+def training_wrapper(data:dict, inp: dict, save_path:str, save_folder:str, sweep: bool) -> None:
     """
     Wrapper around main train function, depending on whether to include sweep or not
 
@@ -83,37 +83,33 @@ def training_wrapper(data:dict, inp: dict, save_path:str, save_folder:str, sweep
         save_path    (str): location where intermediate data is saved
         save_folder (bool): If true, save resulting trained models in folder.
         sweep       (bool): If true: carries out hyperparameter sweep
-        test_only   (bool): If true: skipps entire training and goes directly to testing.
 
     Returns: 
         Trained model saved in save_path.
     
     """
-    if test_only: 
-        print('Not training any model, just testing.')
+
+    if not sweep:
+        #_______________________________________
+        # Call function to train without sweep
+        # _______________________________________
+        inp_ = inp
+        inp = main_train(data, save_path, config = inp_, project_name = 'ShellSim3D', save_folder = save_folder)
+
+    elif sweep:
+        #________________________________________
+        # Call function to train with sweep
+        # ______________________________________
+        raise UserWarning('This part of the code has not yet been debugged in the new version.')
     
-    else:
-        if not sweep:
-            #_______________________________________
-            # Call function to train without sweep
-            # _______________________________________
-            inp_ = inp
-            inp = main_train(data, save_path, config = inp_, project_name = 'ShellSim3D', save_folder = save_folder)
+        # Define sweep configuration
+        from config_inp import sweep_config
 
-        elif sweep:
-            #________________________________________
-            # Call function to train with sweep
-            # ______________________________________
-            raise UserWarning('This part of the code has not yet been debugged in the new version.')
-        
-            # Define sweep configuration
-            from config_inp import sweep_config
-
-            # start sweep
-            sweep_id = wandb.sweep(sweep = sweep_config, project='ShellSim3D_sweep')
-            wandb.agent(sweep_id, 
-                        function= lambda: main_train(data = data, save_path = save_path),
-                        count = 1)
+        # start sweep
+        sweep_id = wandb.sweep(sweep = sweep_config, project='ShellSim3D_sweep')
+        wandb.agent(sweep_id, 
+                    function= lambda: main_train(data = data, save_path = save_path),
+                    count = 1)
         
     return
 
@@ -409,7 +405,6 @@ def save_inp(inp: dict, save_path = 'training\\config'):
             pickle.dump(inp, fp)
     return
 
-
 def save_stats(stats:dict, save_path = 'training\\config'):
     """
     saving stats file for use in testing / later inference 
@@ -419,6 +414,23 @@ def save_stats(stats:dict, save_path = 'training\\config'):
             pickle.dump(stats, fp)
 
     return
+
+def save_test_data(train_eval_test_data, save_path = 'training\\config'):
+    """
+    Save test data in config folder.
+
+    Args: 
+        train_eval_test_data    (dict): dict containing train, eval and test data
+        save_path               (str):  location where to save the data    
+
+    Returns:
+        saves only test data in config folder
+    
+    """
+    test_data = {'X_test': train_eval_test_data['X_test'],
+                'y_test': train_eval_test_data['y_test']}
+    with open(os.path.join(save_path, 'test_data.pkl'), 'wb') as fp:
+            pickle.dump(test_data, fp)
 
 def set_torch_params():
     """

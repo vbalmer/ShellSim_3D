@@ -36,7 +36,6 @@ def single_element_test(idx_eps, geom, model_path, save_path = None,
     Requires generation of new "predictions" with NN / calculations with NLFEA
 
 
-
     Args:
         idx_eps         (list)      desired dimension for input epsilon - if len(idx_eps) >1: the first eps_idx will be varied, the second will be in three steps.
         geom            (list)      geometrical input parameters (t, rho, CC)
@@ -46,7 +45,7 @@ def single_element_test(idx_eps, geom, model_path, save_path = None,
         save_path       (str)       location to save the figure
         multirow        (bool)      if True: plots 6 rows with all sig_i and D_i corresponding to the selected eps_i
         NN_comp         (str-list)  if not None: Contains the path and ep number to a second NN which shall be 
-                                    compared to the first NN in model_path (e.g. ['04_Training\\new_data\\_simple_logs\\v_3xx', '_xx', 'TWODIM'])
+                                    compared to the first NN in model_path (e.g. ['training\\logs', 2])
         allcols         (bool)      if True, prints all predictions of all stiffness matrix entries, not just the ones related to the varied epsilon
         train_points    (bool)      if True, will plot training points of the corresponding geometry and stress / stiffness 
                                     in addition to the predicted and NLFEA curves
@@ -62,6 +61,7 @@ def single_element_test(idx_eps, geom, model_path, save_path = None,
 
     # Step 1: Sample a meaningful vector for idx_eps
     min_, max_ = -3e-3, 5e-3
+    # min_, max_ = -0.02e-3, 0.033e-3
     inp_vector = sample_idx_eps(idx_eps, min_, max_, geom)
     print(f'Sampled eps values.')
 
@@ -76,7 +76,7 @@ def single_element_test(idx_eps, geom, model_path, save_path = None,
 
 
     # Step 2c: Calculate all NN values for given eps input
-    sig_D_NN = predict_sig_D_NN(inp_vector, model_path, NN_comp)
+    sig_D_NN = predict_sig_D_NN_wrapper(inp_vector, model_path, NN_comp)
     print('Calculated NN values')
 
 
@@ -86,7 +86,7 @@ def single_element_test(idx_eps, geom, model_path, save_path = None,
 
     # Step 3: Plot the figures
     plot_single_element_test(idx_eps, inp_vector['X_test'], sig_D_NLFEA, sig_D_linel, sig_D_NN, 
-                             multirow, all_cols, save_path)
+                             multirow, all_cols, NN_comp, model_path, save_path)
 
 
 
@@ -101,11 +101,12 @@ def sample_idx_eps(idx_eps, min_idx_eps, max_idx_eps, geom, num_samples = 100, s
     '''
     samples eps_inp only for the dimension given in idx_eps  
     
-    idx_eps      (list)       desired dimension for input epsilon
-    geom         (list)       geometrical input parameters (t, rho, CC)
-    model_path   (str)        path to sampled data
-    range_factor (float)      to reduce the max. range of epsilons in the input vector
-    num_samples  (int)        amount of values to be sampled in eps
+    Args: 
+        idx_eps      (list)       desired dimension for input epsilon
+        geom         (list)       geometrical input parameters (t, rho, CC)
+        model_path   (str)        path to sampled data
+        range_factor (float)      to reduce the max. range of epsilons in the input vector
+        num_samples  (int)        amount of values to be sampled in eps
 
     '''
 
@@ -191,7 +192,7 @@ def calculate_sig_D_NLFEA(eps_g: np.array, constants: dict, mat_dict: dict, cm: 
     
     return sig_D_NLFEA
 
-def predict_sig_D_NN(inp_vector:dict, model_path:str, NN_comp:bool):
+def predict_sig_D_NN(inp_vector:dict, model_path:str):
     """
     Predicts sig_g and D based on trained model. If NN_comp is True: calculates with two different versions of NN to enable comparison.
     
@@ -207,11 +208,22 @@ def predict_sig_D_NN(inp_vector:dict, model_path:str, NN_comp:bool):
         sig_D_NN = {
                     'sig': sig_NN,
                     'D': De_NN,
-                }
-        
-        if NN_comp: 
-            raise UserWarning('This has not yet been implemented.')
+                }         
     
+    return sig_D_NN
+
+def predict_sig_D_NN_wrapper(inp_vector:dict, model_path:str, NN_comp:list):
+    if NN_comp[1] is None: 
+        sig_D_NN = predict_sig_D_NN(inp_vector, model_path)
+    else: 
+        sig_D_NN = {
+            'sig': {'pred':[]},
+            'D': {'pred':[]},
+        }
+        for path, version in zip([model_path[0], NN_comp[0]], [model_path[1], NN_comp[1]]):
+            sig_D_NN_ = predict_sig_D_NN(inp_vector, [path, version])
+            sig_D_NN['sig']['pred'].append(sig_D_NN_['sig']['pred'])
+            sig_D_NN['D']['pred'].append(sig_D_NN_['D']['pred'])
 
     return sig_D_NN
     
@@ -238,25 +250,42 @@ def get_stats_from_folder(model_path: str, model_version: int):
 ################################ auxiliary functions for plotting ################################ 
 
 def plot_single_element_test(idx_eps:list, eps_data:np.array, sig_D_NLFEA:dict, sig_D_linel:dict, sig_D_NN:dict,
-                             multirow: bool, all_cols: bool, save_path: str):
+                             multirow: bool, all_cols: bool, NN_comp: list, model_path:list, save_path: str):
     """
     Plots the results of the single-element-test
 
     Args:
-        idx_eps     (list)
-
+        idx_eps     (list):     index to plot on x-axis
+        eps_data    (np.arr):   strain data (n, 6)
+        sig_D_NLFEA (dict):     NLFEA data for sig and D
+        sig_D_linel (dict):     LFEA data for sig and D
+        sig_D_NN    (dict):     NN data for sig and D
+        multirow    (bool):     if true: plots predictions and values for all 6 rows, not just the idx_eps given. 
+        all_cols    (bool):     if true: plot more columns of D
+        NN_comp     (list):     if None: no comparison, else: contains model number and path to second NN to be plotted.
+        save_path   (str):      location where to save plot
 
     Returns: 
         fig     saves figure at indicated location
     
     """
+    if multirow: 
+        nrows = sig_D_NLFEA['sig'].shape[1]
+    else: 
+        nrows = 1
 
-
-    fig, axs = plt.subplots(1,2, figsize = [21, 7], squeeze = False)
+    fig, axs = plt.subplots(nrows,2, figsize = [2*7, nrows*7], squeeze = False)
 
     # Plot predictions NN vs NLFEA vs LFEA for sigma and D
-    plot_comparison(axs[0,0], idx_eps, eps_data, sig_D_NLFEA['sig'], sig_D_linel['sig'], sig_D_NN['sig']['pred'], multirow)
-    plot_comparison(axs[0,1], idx_eps, eps_data, sig_D_NLFEA['D'], sig_D_linel['D'], sig_D_NN['D']['pred'], multirow)
+    for i in range(nrows):
+        if not multirow:
+            j = idx_eps[0]
+        else: 
+            j = i
+        plot_comparison(axs[i,0], idx_eps, eps_data, sig_D_NLFEA['sig'], sig_D_linel['sig'], sig_D_NN['sig']['pred'],
+                         j, NN_comp, model_path)
+        plot_comparison(axs[i,1], idx_eps, eps_data, sig_D_NLFEA['D'], sig_D_linel['D'], sig_D_NN['D']['pred'],
+                         j, NN_comp, model_path)
 
     # Add title
     figure_formatting_single_el(fig, axs, idx_eps, multirow)
@@ -268,36 +297,36 @@ def plot_single_element_test(idx_eps:list, eps_data:np.array, sig_D_NLFEA:dict, 
 
 
 
-def plot_comparison(axs, idx_eps, eps_data, NLFEA_data, linel_data, NN_data, multirow):
+def plot_comparison(axs, idx_eps, eps_data, NLFEA_data, linel_data, NN_data, i, NN_comp, model_path):
     """
     actual plotting function
     """
 
-    if not multirow: 
-        if len(NLFEA_data.shape) > 2:
-            axs.plot(eps_data[:,idx_eps[0]], NLFEA_data[:,idx_eps[0],idx_eps[0]], color = 'black', label = 'NLFEA')
-            axs.plot(eps_data[:,idx_eps[0]], linel_data[:, idx_eps[0], idx_eps[0]], color = 'lightgrey', linestyle = ':', label = 'LFEA')
-            axs.plot(eps_data[:,idx_eps[0]], NN_data[:, idx_eps[0],idx_eps[0]], color = 'lightblue', linestyle = '--', label = 'NN')
-        
+    x_vec = eps_data[:, idx_eps[0]]
+
+    NLFEA_KWARGS = dict(color = 'black', label = 'NLFEA')
+    LFEA_KWARGS = dict(color = 'lightgrey', linestyle = ':', label = 'LFEA')
+    NN_KWARGS = dict(color = 'lightblue', linestyle = '--', label = 'NN'+str(model_path[1]))
+    NN_COMP_KWARGS = dict(color = 'coral', linestyle = '--', label = 'NN'+str(NN_comp[1]))
+
+    if len(NLFEA_data.shape) > 2: # for stiffness
+        axs.plot(x_vec, NLFEA_data[:,i,idx_eps[0]], **NLFEA_KWARGS)
+        axs.plot(x_vec, linel_data[:,i, idx_eps[0]], **LFEA_KWARGS)
+        if NN_comp[1] is None:
+            axs.plot(x_vec, NN_data[:,i,idx_eps[0]], **NN_KWARGS)
         else: 
-            axs.plot(eps_data[:,idx_eps[0]], NLFEA_data[:,idx_eps[0]], color = 'black', label = 'NLFEA')
-            axs.plot(eps_data[:,idx_eps[0]], linel_data[:, idx_eps[0]], color = 'lightgrey', linestyle = ':', label = 'LFEA')
-            axs.plot(eps_data[:,idx_eps[0]], NN_data[:, idx_eps[0]], color = 'lightblue', linestyle = '--', label = 'NN')
-
-
-    else: 
-        print('Not yet tested...')
-        for i in range(axs.shape[0]):
-            # if multirow
-            if len(NLFEA_data.shape) > 2:
-                axs[i].plot(eps_data[:,idx_eps[0]], NLFEA_data[:,i,idx_eps[0]], color = 'black', label = 'NLFEA')
-                axs[i].plot(eps_data[:,idx_eps[0]], linel_data[:, i, idx_eps[0]], color = 'lightgrey', linestyle = ':', label = 'LFEA')
-                axs[i].plot(eps_data[:,idx_eps[0]], NN_data[:, i,idx_eps[0]], color = 'lightblue', linestyle = '--', label = 'NN')
-            
-            else: 
-                axs[i].plot(eps_data[:,idx_eps[0]], NLFEA_data[:,i], color = 'black', label = 'NLFEA')
-                axs[i].plot(eps_data[:,idx_eps[0]], linel_data[:, i], color = 'lightgrey', linestyle = ':', label = 'LFEA')
-                axs[i].plot(eps_data[:,idx_eps[0]], NN_data[:, i], color = 'lightblue', linestyle = '--', label = 'NN')
+            axs.plot(x_vec, NN_data[0][:,i,idx_eps[0]], **NN_KWARGS)
+            axs.plot(x_vec, NN_data[1][:,i,idx_eps[0]], **NN_COMP_KWARGS)
+        
+    
+    else: # for stresses
+        axs.plot(x_vec, NLFEA_data[:,i], **NLFEA_KWARGS)
+        axs.plot(x_vec, linel_data[:,i], **LFEA_KWARGS)
+        if NN_comp[1] is None:
+            axs.plot(x_vec, NN_data[:,i], **NN_KWARGS)
+        else: 
+            axs.plot(x_vec, NN_data[0][:,i], **NN_KWARGS)
+            axs.plot(x_vec, NN_data[1][:,i], **NN_COMP_KWARGS)
 
     return
 
@@ -310,23 +339,35 @@ def figure_formatting_single_el(fig, axs, idx_eps, multirow):
     
     sig_labels = np.array(['n_x', 'n_y', 'n_xy', 'm_x', 'm_y', 'm_xy'])
     eps_labels = np.array(['eps_x', 'eps_y', 'eps_xy', 'chi_x', 'chi_y', 'chi_xy'])
-    D_labels = np.array([[f'D_{i}{j}' for j in range(6)] for i in range(6)])
+    D_labels = np.array([[f'D_{i+1}{j+1}' for j in range(6)] for i in range(6)])
 
 
     # set axis labels
-    for i in range(axs.shape[0]):
-        if not multirow:
-            axs[0,0].set_ylabel(sig_labels[idx_eps[0]])
-            axs[0,1].set_ylabel(D_labels[idx_eps[0], idx_eps[0]])
-        else: 
-            raise UserWarning('not yet implemented.')
-        for j in range(axs.shape[1]):
-            axs[0,j].set_xlabel(eps_labels[idx_eps[0]])
+    if not multirow:
+        axs[0,0].set_xlabel(eps_labels[idx_eps[0]])
+        axs[0,1].set_xlabel(eps_labels[idx_eps[0]])
+        axs[0,0].set_ylabel(sig_labels[idx_eps[0]])
+        axs[0,1].set_ylabel(D_labels[idx_eps[0], idx_eps[0]])
+    else: 
+        for i in range(axs.shape[0]):
+            axs[i,0].set_xlabel(eps_labels[idx_eps[0]])
+            axs[i,1].set_xlabel(eps_labels[idx_eps[0]])
+            axs[i,0].set_ylabel(sig_labels[i])
+            axs[i,1].set_ylabel(D_labels[i, idx_eps[0]])
 
-    
 
     # set title "Variation of idx_eps"
     fig.suptitle(f'Variation of {eps_labels[idx_eps[0]]}')
+    
+
+    # create legend
+    handles, labels = plt.gca().get_legend_handles_labels()
+    seen = {}
+    for h, l in zip(handles, labels):
+        if l not in seen:
+            seen[l] = h
+
+    plt.legend(seen.values(), seen.keys())
     
     
     return

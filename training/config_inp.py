@@ -4,8 +4,8 @@
 inp = {
     'input_size': 6,                                # 6 + GEOM_SIZE
     'out_size': 6,                                  # 6
-    'hidden_layers': str([512]*5),
-    'batch_size': 4096,                             # Can be defined here, if None: runs with single-batch
+    'hidden_layers': str([1024]*5),
+    'batch_size': 8192,                             # Can be defined here, if None: runs with single-batch
     'num_epochs': 300,
     'switch_step_percentage': 1,                    # Percentage after which to switch to LBFGS instead of Adam 
     'activation': 'ELU',

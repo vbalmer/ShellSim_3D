@@ -5,6 +5,7 @@
 import os
 import config
 import cupy as cp
+import wandb
 config.USE_GPU = True
 
 from sampler_utils_RC3D import *
@@ -15,6 +16,8 @@ SAMPLE_2D = False
 PLOT_D = True
 SAVE_D = True
 BATCHWISE = True
+FILTER_DATA = True
+LOG_WANDB =  True
 
 
 
@@ -22,6 +25,7 @@ BATCHWISE = True
 
 constants, mat_dict = get_constant_sampling_params(SAMPLE_2D)
 save_data_dir = os.path.join('D:\\', 'VeraBalmer\\ShellSim3D')
+config_ = initialise_wandb(constants, mat_dict, LOG_WANDB)
 
 
 ############################ 1 - Sampling strains ############################
@@ -69,7 +73,9 @@ if not BATCHWISE:
     save_3D_data(sig_g, save_data_dir, filename = 'sig_g')
 
 else: 
-    sig_g, dh = sig_simulation_batchwise(cp.asarray(eps_g), simulatesig, cm, mat_dict, n_batches = 1)
+
+    # 2.1 - 2.4 Find generalised stresses and stiffnesses    
+    sig_g, dh = sig_simulation_batchwise(cp.asarray(eps_g), simulatesig, cm, mat_dict, n_batches = 17)
 
     # 2.5 Save generalised stresses
     save_3D_data(sig_g, save_data_dir, filename = 'sig_g')
@@ -89,3 +95,27 @@ if PLOT_D:
 
 if SAVE_D: 
     save_3D_data(dh, save_data_dir, filename = 'D')
+
+
+
+############################ 4 - Filtering data ############################
+
+if FILTER_DATA:
+    if SAMPLE_2D: 
+        raise UserWarning('This function only applies to data sampled with 3D data.')
+    if eps_g.shape[0] > 17e6:
+        raise UserWarning('This function has no batchwise implementation yet.')
+    else:
+        eps_g_f, sig_g_f, D_f = filter_3d_data(eps_g, sig_g, dh, constants)
+        if SAVE_D: 
+            for data, name in zip([eps_g_f, sig_g_f, D_f],  ['eps_g', 'sig_g', 'D']):
+                save_3D_data(data, save_data_dir, filename = name)
+    
+    if PLOT_D:
+        save_plot_path = os.path.join(os.getcwd(), "sampling\\plots\\")
+        plot_filtered_stiffness(eps_g_f, D_f, 0, save_plot_path)
+        imshow_D_filtered(eps_g_f, D_f, 0, save_plot_path)
+
+
+if LOG_WANDB:
+    wandb.finish()

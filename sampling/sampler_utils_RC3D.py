@@ -2,6 +2,7 @@
 
 import os
 import numpy as np
+import cupy as cp
 import pyDOE as doe
 from itertools import permutations
 import time
@@ -11,8 +12,10 @@ import matplotlib.pyplot as plt
 
 try:
     from .concrete_classes import dict_CC
+    from .simulating_sig_vec_RC3D import SigSimulator
 except ImportError:
     from concrete_classes import dict_CC
+    from simulating_sig_vec_RC3D import SigSimulator
 
 
 ########################################## Sampling strains ##########################################
@@ -31,7 +34,7 @@ def get_constant_sampling_params(sample_2d:bool) -> tuple:
 
     c = {
         'n_samples_2D': 1e6, 
-        'n_samples_3D': 1e6,         #4e9,47e3 (for 6 elements per dimension), 64e6 (20 elements per dimension)
+        'n_samples_3D': 17e6,         #4e9,47e3 (for 6 elements per dimension), 64e6 (20 elements per dimension)
 
         'min': [-3e-3]*2 + [-4e-3],
         'max': [5e-3]*2  + [4e-3],
@@ -505,10 +508,26 @@ def plot_filtered_stiffness(data_eps, data_D, idx_eps, save_path):
     # sort data
     data_s_eps, data_s_D = sort_data(data_f_eps, data_f_D, idx_eps)
 
+    # deduplicate data (if still two values left inside tolerance, always use the first one):
+    data_d_eps, data_d_D = deduplicate_by_eps(data_s_eps, data_s_D, idx_eps)
+
     # plot data
-    plot_data_stiffness(data_s_eps, data_s_D, idx_eps,save_path)
+    plot_data_stiffness(data_d_eps, data_d_D, idx_eps,save_path)
 
     return
+
+def deduplicate_by_eps(data_s_eps, data_s_D, idx_eps, decimals=6):
+    x = np.round(data_s_eps[:, idx_eps], decimals=decimals)
+    unique_x = np.unique(x)
+
+    unique_eps = []
+    unique_D = []
+    for val in unique_x:
+        group_mask = x == val
+        unique_eps.append(data_s_eps[group_mask][0])
+        unique_D.append(data_s_D[group_mask][0])
+
+    return np.array(unique_eps), np.array(unique_D)
 
 def get_mask_strain(data_eps, idx_eps, tol = [0.5e-3, 0.5e-3, 0.9e-3, 0.4e-5, 0.4e-5, 0.4e-5]):
     # tol for 6 points per direction: [0.5e-3, 0.5e-3, 1.6e-3, 0.5e-5, 0.5e-5, 0.7e-5]
@@ -629,3 +648,126 @@ def imshow_sig_eps_all(sig_g, eps_g, save_path):
             print(f'Saved {filename1} to {save_path}')
 
     return
+
+
+
+########################################## Filtering 3d generated data ##########################################
+
+
+def filter_3d_data(eps_g, sig_g, dh, constants):
+    """
+    filter out physically meaningless datapoints (datapoints where the top and bottom layer have too large or too small strains)
+
+    Args: 
+        eps_g   (np.arr): original generalised strain matrix (n, 6)
+        sig_g   (np.arr): original generalised stress (n, 6)
+        dh      (np.arr): original stiffness matrix (n, 6, 6)
+        t       (int):    thickness of element (constant for now)
+    Returns: 
+        eps_g_f (np.arr): filtered eps_g
+        sig_g_f (np.arr): filtered sig_g
+        dh_f    (np.arr): filtered stiffness
+    """
+    
+    # 1 - Calculate top and bottom strains from eps_g
+    simulatesig = SigSimulator(constants)
+    e = simulatesig.find_e_vec(cp.array(eps_g))
+    eps_top, eps_bot = e[:,-1,:].get(), e[:,0,:].get()
+
+    # 2 - Check whether strains lie in desired ranges
+    eps_x_y_range = [-3e-3, 50e-3]
+    gamma_xy_range = [-20e-3, 20e-3]
+    mask = get_mask_strains(eps_top, eps_bot, eps_x_y_range, gamma_xy_range)
+
+    # 3 - Remove values that do not live in desired ranges
+
+    eps_g_f = eps_g[mask]
+    sig_g_f = sig_g[mask]
+    dh_f = dh[mask]
+    
+    return eps_g_f, sig_g_f, dh_f
+
+def get_mask_strains(eps_top, eps_bot, eps_range, gamma_range):  
+    """
+    check whether the calculated strains lie within desired ranges
+    
+    Args: 
+        eps_top     (np.arr): strains in top layer (n, 3)
+        eps_bot     (np.arr): strains in bottom layer (n, 3)
+        eps_range   (list):   min and max value that is in acceptable epsilon range [min, max]
+        gamma_range (list):   min and max value that is in acceptable gamma range [min, max]
+
+    Returns: 
+        mask        (np.arr): bool (n, 1)
+
+    """
+
+    mask_eps_x = (eps_top[:,0] > eps_range[0]) & (eps_top[:,0] < eps_range[1]) & (eps_bot[:,0] > eps_range[0]) & (eps_bot[:,0] < eps_range[1])
+    mask_eps_y = (eps_top[:,1] > eps_range[0]) & (eps_top[:,1] < eps_range[1]) & (eps_bot[:,1] > eps_range[0]) & (eps_bot[:,1] < eps_range[1])
+    mask_gam = (eps_top[:,2] > gamma_range[0]) & (eps_top[:,2] < gamma_range[1]) & (eps_bot[:,2] > gamma_range[0]) & (eps_bot[:,2] < gamma_range[1])
+
+    mask = mask_eps_x & mask_eps_y & mask_gam
+
+    print(f'Amount of points left after filtering: {np.sum(mask)}/{eps_top.shape[0]} = {np.sum(mask)/eps_top.shape[0]*100:.2f}\%')
+
+    return mask
+
+'''
+#### Not in use ####
+
+def get_neutral_axis(eps_g, t):
+    """
+    calculates z_sup and z_inf (neutral axis) for every element in the array
+    
+    Args: 
+        eps_g   (np.arr): generalised strains (n, 6)
+        t       (int):    thickness, constant
+
+    Returns: 
+        z_sup   (np.arr): superior height to neutral axis (n, 1)
+        z_inf   (np.arr): inferior height to neutral axis (n, 1)
+
+    """ 
+    print('Warning: This function has not been tested.')
+    z_sup = np.zeros((eps_g.shape[0], 1))
+
+    chi = eps_g[:,3:6]
+    eps_mid = eps_g[:,0:3]
+
+    mask_pos = ((chi > 0) & (eps_mid > 0)) | ((chi < 0) & (eps_mid < 0))
+    mask_zero = ((chi < 1e-9) & (chi > -1e-9))
+    mask_neg = ~mask_pos & ~mask_zero
+
+    z_sup[mask_pos] = t/2 - eps_mid[mask_pos]/np.tan(chi[mask_pos])
+    z_sup[mask_neg] = t/2 + eps_mid[mask_neg]/np.tan(chi[mask_neg])
+    z_sup[mask_zero] = 0
+
+    z_inf = t-z_sup
+    
+    return z_sup, z_inf
+
+def get_top_bottom_strains(eps_g, z_sup, z_inf):  
+    """
+    get top and bottom layer stresses for every element in dataset
+    
+    Args: 
+        eps_g       (np.arr): generalised strains (n, 6)
+        z_sup       (np.arr): neutral axis from the top (n, 1)
+        z_inf       (np.arr): neutral axis from the bottom (n, 1)
+    
+    Returns: 
+        eps_top   (np.arr): layer stresses in top layer (n, 3)
+        eps_bottom(np.arr): layer stresses in bottom layer (n, 3)
+
+    """
+
+    print('Warning: This function has not been tested.')
+
+    eps_mid = eps_g[:,0:3]
+    chi = eps_g[:,3:6]
+    
+    eps_top = eps_mid + z_sup*chi
+    eps_bot = eps_mid + z_inf*chi
+
+    return eps_top, eps_bot
+'''
