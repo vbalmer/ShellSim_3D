@@ -70,8 +70,13 @@ def main_train(data: dict, save_path: str, config = None, project_name = 'ShellS
         filenames = ['inp.pkl', 'stats.pkl', 'last_trained_model.pt', 'best_trained_model.pt', 'test_data.pkl']
 
         if save_folder:
-            src_folder = os.path.join(os.getcwd(), 'training\\config')
-            base_dest_folder = os.path.join(os.getcwd(), 'training\\logs')
+            # Use save_path (set by train.py from MODEL_DIR / LOGS_DIR env vars on HPC)
+            # rather than cwd-relative Windows paths, so this also works on Linux.
+            src_folder = save_path
+            base_dest_folder = os.environ.get('LOGS_DIR') or os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), 'logs'
+            )
+            os.makedirs(base_dest_folder, exist_ok=True)
             copy_files_with_incremented_version(src_folder, base_dest_folder, filenames)
 
     return inp
@@ -404,7 +409,7 @@ def model_print(model_dict:dict) -> None:
     print(model)
     return
 
-def save_inp(inp: dict, save_path = 'training\\config'):
+def save_inp(inp: dict, save_path = os.path.join('training', 'config')):
     """
     saving inp file for use in testing / later inference
     """
@@ -413,7 +418,7 @@ def save_inp(inp: dict, save_path = 'training\\config'):
             pickle.dump(inp, fp)
     return
 
-def save_stats(stats:dict, save_path = 'training\\config'):
+def save_stats(stats:dict, save_path = os.path.join('training', 'config')):
     """
     saving stats file for use in testing / later inference 
     """
@@ -423,7 +428,7 @@ def save_stats(stats:dict, save_path = 'training\\config'):
 
     return
 
-def save_test_data(train_eval_test_data, save_path = 'training\\config'):
+def save_test_data(train_eval_test_data, save_path = os.path.join('training', 'config')):
     """
     Save test data in config folder.
 

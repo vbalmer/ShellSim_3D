@@ -18,7 +18,7 @@ SEED = 42
 
 def read_h5_file(save_data_path, filename, n_every:int) -> tuple:
     name = filename
-    path = save_data_path + '\\output_' + name + '.h5'
+    path = os.path.join(save_data_path, 'output_' + name + '.h5')
     with h5py.File(path, 'r') as f:
         data = f[name][::n_every,:]
 
@@ -340,8 +340,10 @@ def plot_3D_data(data, filename, n_every: int = 1):
 
     t2 = time.perf_counter()
     plt.tight_layout()
-    plt.savefig(os.path.join(os.getcwd(), "training\\plots\\" + filename + ".png"))
-    print(f'Saved {filename} to training\\plots\\{filename}.png')
+    _plot_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plots")
+    os.makedirs(_plot_dir, exist_ok=True)
+    plt.savefig(os.path.join(_plot_dir, filename + ".png"))
+    print(f'Saved {filename} to {_plot_dir}{os.sep}{filename}.png')
     # print(f'time saving figure: {(time.perf_counter()-t2)/60:.2f}min')
 
     return

@@ -25,7 +25,18 @@ SAMPLING_TYPE = 'combined_log_uniform'          # can be: uniform, uniform_3D, u
 ############################ 0 - Get constants ############################
 
 constants, mat_dict = get_constant_sampling_params(SAMPLE_2D)
-save_data_dir = os.path.join('D:\\', 'VeraBalmer\\ShellSim3D')
+
+# Optional env-var override for sample count (used by smoke tests / scaling sweeps).
+# Accepts scientific notation, e.g. N_SAMPLES_3D=1e6.
+if os.environ.get('N_SAMPLES_3D'):
+    constants['n_samples_3D'] = int(float(os.environ['N_SAMPLES_3D']))
+    print(f"[sampler] N_SAMPLES_3D override -> {constants['n_samples_3D']:,}")
+
+# DATA_DIR env var lets us override the output location (used on Euler / HPC).
+# Falls back to the original Windows path so local runs keep working unchanged.
+save_data_dir = os.environ.get('DATA_DIR') or os.path.join('D:\\', 'VeraBalmer\\ShellSim3D')
+os.makedirs(save_data_dir, exist_ok=True)
+print(f'[sampler] Saving data to: {save_data_dir}')
 config_ = initialise_wandb(constants, mat_dict, LOG_WANDB)
 
 
@@ -85,7 +96,8 @@ else:
 ############################ 3 - Visualising stiffnesses ############################
 
 if PLOT_D:
-    save_plot_path = os.path.join(os.getcwd(), "sampling\\plots\\")
+    save_plot_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plots")
+    os.makedirs(save_plot_path, exist_ok=True)
     plot_filtered_stiffness(eps_g, dh, 0, save_plot_path)
     imshow_D_filtered(eps_g, dh, 0, save_plot_path)
 
@@ -113,7 +125,8 @@ if FILTER_DATA:
                 save_3D_data(data, save_data_dir, filename = name)
     
     if PLOT_D:
-        save_plot_path = os.path.join(os.getcwd(), "sampling\\plots\\")
+        save_plot_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plots")
+        os.makedirs(save_plot_path, exist_ok=True)
         plot_filtered_stiffness(eps_g_f, D_f, 0, save_plot_path)
         imshow_D_filtered(eps_g_f, D_f, 0, save_plot_path)
 

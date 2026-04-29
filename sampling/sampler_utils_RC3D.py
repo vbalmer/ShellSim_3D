@@ -575,8 +575,10 @@ def plot_3D_data(save_data_path, filename, n_every: int = int(1e3)):
 
     t2 = time.perf_counter()
     plt.tight_layout()
-    plt.savefig(os.path.join(os.getcwd(), "sampling\\plots\\" + filename + ".png"))
-    print(f'Saved {filename} to sampling\\plots\\{filename}.png')
+    _plot_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plots")
+    os.makedirs(_plot_dir, exist_ok=True)
+    plt.savefig(os.path.join(_plot_dir, filename + ".png"))
+    print(f'Saved {filename} to {_plot_dir}{os.sep}{filename}.png')
     print(f'time saving figure: {(time.perf_counter()-t2)/60:.2f}min')
 
     return

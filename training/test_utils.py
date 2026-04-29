@@ -24,8 +24,11 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 ################################ main test function ################################
 
-def test_NN_model(test_data: dict, stats: dict, save_path: str, version: int, 
-                  plot_path = 'training\\plots_test'): 
+def test_NN_model(test_data: dict, stats: dict, save_path: str, version: int,
+                  plot_path = None):
+    if plot_path is None:
+        plot_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plots_test')
+    os.makedirs(plot_path, exist_ok=True)
     """
     Main testing function. inp dict and trained model are collected from saved model path.
     Data and stats are passed directly from train file. 
