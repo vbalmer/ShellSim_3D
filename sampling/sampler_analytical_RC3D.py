@@ -96,7 +96,7 @@ else:
 
 ############################ 3 - Visualising stiffnesses ############################
 
-if PLOT_D:
+if PLOT_D and sig_g.shape[0] < 64e6:
     save_plot_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plots")
     os.makedirs(save_plot_path, exist_ok=True)
     plot_filtered_stiffness(eps_g, dh, 0, save_plot_path)
