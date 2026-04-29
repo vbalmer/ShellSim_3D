@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=8G
 #SBATCH --gpus=1
-#SBATCH --gres=gpumem:20g
+#SBATCH --gres=gpumem:24g
 #
 # Step 2 of the pipeline: train the FFNN on the sampled data.
 # Reads:    $DATA_DIR/output_{eps_g,sig_g,D}.h5

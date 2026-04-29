@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem-per-cpu=4G
 #SBATCH --gpus=1
-#SBATCH --gres=gpumem:8g
+#SBATCH --gres=gpumem:24g
 #
 # Smoke-test sampler. Validates: modules, venv, cupy + GPU, h5 writes,
 # DATA_DIR plumbing. Tiny dataset, no specific GPU requested.

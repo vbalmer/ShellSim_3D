@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem-per-cpu=4G
 #SBATCH --gpus=1
-#SBATCH --gres=gpumem:8g
+#SBATCH --gres=gpumem:24g
 #
 # Smoke-test trainer. Validates: torch + lightning + GPU, data load from
 # DATA_DIR, MODEL_DIR / LOGS_DIR plumbing, full save path (best/last .pt,

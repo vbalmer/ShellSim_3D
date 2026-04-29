@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=8G
 #SBATCH --gpus=1
-#SBATCH --gres=gpumem:20g
+#SBATCH --gres=gpumem:24g
 #
 # Step 1 of the pipeline: sample 3D RC strain/stress/stiffness data.
 # Writes:
