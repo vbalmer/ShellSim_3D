@@ -123,7 +123,7 @@ if FILTER_DATA:
             for data, name in zip([eps_g_f, sig_g_f, D_f],  ['eps_g', 'sig_g', 'D']):
                 save_3D_data(data, save_data_dir, filename = name)
     else:
-        eps_g_f, sig_g_f, D_f = filter_3d_data_batchwise(eps_g, sig_g, dh, constants, n_batches = constants['n_samples_3D']//1000000)
+        eps_g_f, sig_g_f, D_f = filter_3D_data_batchwise(eps_g, sig_g, dh, constants, n_batches = constants['n_samples_3D']//1000000)
         if SAVE_D: 
             for data, name in zip([eps_g_f, sig_g_f, D_f],  ['eps_g', 'sig_g', 'D']):
                 save_3D_data(data, save_data_dir, filename = name)
