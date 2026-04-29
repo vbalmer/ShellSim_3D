@@ -23,8 +23,8 @@ class HiddenPrints:
         sys.stdout = self._original_stdout
 
 
-def single_element_test(idx_eps, geom, model_path, save_path = None, 
-                        multirow = False, NN_comp = None, all_cols = False, train_points = False):
+def single_element_test(idx_eps, geom, model_path,  min_ , max_, save_path = None, plot_LFEA = False,
+                        multirow = False, NN_comp = None, all_cols = False, test_points = False):
     
     """
     Conduct single-element-test for idx_eps (e.g. 0 = pure tension in x-direction)
@@ -42,12 +42,14 @@ def single_element_test(idx_eps, geom, model_path, save_path = None,
         idx_sig         (list)      desired dimension for output sigma (if multirow = False)
         idx_D           (list)      desired dimension for output D (if multirow = False)
         model_path      (str)       path to trained model, inp and stats
+        min, max        (float)     minimum and maximum value of strain to sample.
         save_path       (str)       location to save the figure
+        plot_LFEA       (bool)      if True: also plots linear finite element analysis results.
         multirow        (bool)      if True: plots 6 rows with all sig_i and D_i corresponding to the selected eps_i
         NN_comp         (str-list)  if not None: Contains the path and ep number to a second NN which shall be 
                                     compared to the first NN in model_path (e.g. ['training\\logs', 2])
         allcols         (bool)      if True, prints all predictions of all stiffness matrix entries, not just the ones related to the varied epsilon
-        train_points    (bool)      if True, will plot training points of the corresponding geometry and stress / stiffness 
+        test_points    (bool)      if True, will plot training points of the corresponding geometry and stress / stiffness 
                                     in addition to the predicted and NLFEA curves
     
     Returns: 
@@ -55,13 +57,12 @@ def single_element_test(idx_eps, geom, model_path, save_path = None,
     
     """
 
-    if all_cols or train_points: 
+    if all_cols or test_points: 
         raise UserWarning('The functionality for "all_cols" or "train_points" has not yet been implemented.')
     
 
     # Step 1: Sample a meaningful vector for idx_eps
-    min_, max_ = -3e-3, 5e-3
-    # min_, max_ = -0.02e-3, 0.033e-3
+   
     inp_vector = sample_idx_eps(idx_eps, min_, max_, geom)
     print(f'Sampled eps values.')
 
@@ -71,7 +72,7 @@ def single_element_test(idx_eps, geom, model_path, save_path = None,
     print('Calculated NLFEA values')
 
     # Step 2b: Calculate all LFEA values for given eps input
-    sig_D_linel = calculate_sig_D_NLFEA(inp_vector['X_test'], constants, mat_dict, cm = 1)
+    sig_D_linel = calculate_sig_D_NLFEA(inp_vector['X_test'], constants, mat_dict, cm = 1, plot_LFEA=plot_LFEA)
     print('Calculated LFEA values')
 
 
@@ -86,7 +87,7 @@ def single_element_test(idx_eps, geom, model_path, save_path = None,
 
     # Step 3: Plot the figures
     plot_single_element_test(idx_eps, inp_vector['X_test'], sig_D_NLFEA, sig_D_linel, sig_D_NN, 
-                             multirow, all_cols, NN_comp, model_path, save_path)
+                             multirow, all_cols, NN_comp, model_path, save_path, plot_LFEA)
 
 
 
@@ -156,7 +157,7 @@ def sample_idx_eps(idx_eps, min_idx_eps, max_idx_eps, geom, num_samples = 100, s
 
     return test_data
 
-def calculate_sig_D_NLFEA(eps_g: np.array, constants: dict, mat_dict: dict, cm: int):
+def calculate_sig_D_NLFEA(eps_g: np.array, constants: dict, mat_dict: dict, cm: int, plot_LFEA: bool = False):
     """
     calculates sig and D based on sig-simulator (same as used for sampling the data)
 
@@ -165,29 +166,37 @@ def calculate_sig_D_NLFEA(eps_g: np.array, constants: dict, mat_dict: dict, cm: 
         constants       (dict): constant values for sampling (contains values like t, rho_x, rho_y, CC, ...)
         mat_dict        (dict): additional constant values for sampling (material parameters that can be derived from "constants")    
         cm               (int): cm = 1: linear elastic, cm = 3: nonlinear
+        plot_LFEA       (bool): If True: calculates LFEA results. Else sets output to "{}"
     
     Returns: 
         sig_D_NLFEA     (dict): containing two arrays: sig_g and dh
     """
-    with HiddenPrints():
-        simulatesig = SigSimulator(constants)
+    if plot_LFEA or cm == 3:
+        with HiddenPrints():
+            simulatesig = SigSimulator(constants)
 
-        # 2.1 Find layer strains
-        e = simulatesig.find_e_vec(eps_g)
+            # 2.1 Find layer strains
+            e = simulatesig.find_e_vec(eps_g)
 
-        # 2.2 Find layer stresses
-        s = simulatesig.find_s_vec(e, mat_dict, cm_klij = cm)
+            # 2.2 Find layer stresses
+            s = simulatesig.find_s_vec(e, mat_dict, cm_klij = cm)
 
-        # 2.3 Find generalised stresses
-        sig_g = simulatesig.find_sh_vec(s, cm_klij = cm)
+            # 2.3 Find generalised stresses
+            sig_g = simulatesig.find_sh_vec(s, cm_klij = cm)
 
-        # 2.4 Find stiffnesses
-        dh = simulatesig.find_dh_vec(s, mat_dict, cm_klij = cm)
-        
+            # 2.4 Find stiffnesses
+            dh = simulatesig.find_dh_vec(s, mat_dict, cm_klij = cm)
+            
+            sig_D_NLFEA = {
+                            'sig': sig_g,
+                            'D': dh,
+                    }
+    else: 
+        # don't calculate LFEA results
         sig_D_NLFEA = {
-                        'sig': sig_g,
-                        'D': dh,
-                }
+            'sig': None,
+            'D': None,
+        }
     
     
     return sig_D_NLFEA
@@ -250,7 +259,7 @@ def get_stats_from_folder(model_path: str, model_version: int):
 ################################ auxiliary functions for plotting ################################ 
 
 def plot_single_element_test(idx_eps:list, eps_data:np.array, sig_D_NLFEA:dict, sig_D_linel:dict, sig_D_NN:dict,
-                             multirow: bool, all_cols: bool, NN_comp: list, model_path:list, save_path: str):
+                             multirow: bool, all_cols: bool, NN_comp: list, model_path:list, save_path: str, plot_LFEA: bool):
     """
     Plots the results of the single-element-test
 
@@ -264,6 +273,7 @@ def plot_single_element_test(idx_eps:list, eps_data:np.array, sig_D_NLFEA:dict, 
         all_cols    (bool):     if true: plot more columns of D
         NN_comp     (list):     if None: no comparison, else: contains model number and path to second NN to be plotted.
         save_path   (str):      location where to save plot
+        plot_LFEA   (bool):     if true: also plots LFEA results.
 
     Returns: 
         fig     saves figure at indicated location
@@ -283,9 +293,9 @@ def plot_single_element_test(idx_eps:list, eps_data:np.array, sig_D_NLFEA:dict, 
         else: 
             j = i
         plot_comparison(axs[i,0], idx_eps, eps_data, sig_D_NLFEA['sig'], sig_D_linel['sig'], sig_D_NN['sig']['pred'],
-                         j, NN_comp, model_path)
+                         j, NN_comp, model_path, plot_LFEA)
         plot_comparison(axs[i,1], idx_eps, eps_data, sig_D_NLFEA['D'], sig_D_linel['D'], sig_D_NN['D']['pred'],
-                         j, NN_comp, model_path)
+                         j, NN_comp, model_path, plot_LFEA)
 
     # Add title
     figure_formatting_single_el(fig, axs, idx_eps, multirow)
@@ -297,7 +307,7 @@ def plot_single_element_test(idx_eps:list, eps_data:np.array, sig_D_NLFEA:dict, 
 
 
 
-def plot_comparison(axs, idx_eps, eps_data, NLFEA_data, linel_data, NN_data, i, NN_comp, model_path):
+def plot_comparison(axs, idx_eps, eps_data, NLFEA_data, linel_data, NN_data, i, NN_comp, model_path, plot_LFEA):
     """
     actual plotting function
     """
@@ -311,7 +321,8 @@ def plot_comparison(axs, idx_eps, eps_data, NLFEA_data, linel_data, NN_data, i, 
 
     if len(NLFEA_data.shape) > 2: # for stiffness
         axs.plot(x_vec, NLFEA_data[:,i,idx_eps[0]], **NLFEA_KWARGS)
-        axs.plot(x_vec, linel_data[:,i, idx_eps[0]], **LFEA_KWARGS)
+        if plot_LFEA:
+            axs.plot(x_vec, linel_data[:,i, idx_eps[0]], **LFEA_KWARGS)
         if NN_comp[1] is None:
             axs.plot(x_vec, NN_data[:,i,idx_eps[0]], **NN_KWARGS)
         else: 
@@ -321,7 +332,8 @@ def plot_comparison(axs, idx_eps, eps_data, NLFEA_data, linel_data, NN_data, i, 
     
     else: # for stresses
         axs.plot(x_vec, NLFEA_data[:,i], **NLFEA_KWARGS)
-        axs.plot(x_vec, linel_data[:,i], **LFEA_KWARGS)
+        if plot_LFEA:
+            axs.plot(x_vec, linel_data[:,i], **LFEA_KWARGS)
         if NN_comp[1] is None:
             axs.plot(x_vec, NN_data[:,i], **NN_KWARGS)
         else: 

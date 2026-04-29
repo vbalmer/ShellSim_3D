@@ -10,9 +10,12 @@ import numpy as np
 import re
 import glob
 import shutil
+import math
 
 
 from torch.utils.data import TensorDataset, DataLoader
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(os.getpid())
 
 
 from architectures import *
@@ -176,8 +179,10 @@ def simple_train(inp:dict, model_dict:dict, data:dict, save_path:str) -> FFNN:
 
     train_dataset = TensorDataset(data['X_train_tt'], data['y_train_tt'])
     train_loader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True)
+                            #   num_workers = 4, pin_memory = True, persistent_workers=True, prefetch_factor=2)
     eval_dataset = TensorDataset(data['X_eval_tt'], data['y_eval_tt'])
     eval_loader = DataLoader(eval_dataset, batch_size=batch_size_eval, shuffle = True)
+                            #  num_workers = 2, pin_memory = True, persistent_workers=True, prefetch_factor=2)
     model = simple_train_aux_(train_loader, eval_loader, model, optimizer, scheduler, lossFn, MAXEPOCHS, save_path, inp)
 
     return model
@@ -289,7 +294,9 @@ def optimizer_setup(inp:dict, data:dict, model: FFNN) -> Adam_LBFGS:
         no_switch_step = int(inp['switch_step_percentage']*inp['num_epochs'])
     else: 
         no_switch_step = int(inp['switch_step_percentage']*inp['num_epochs']*int(data['X_train_tt'].shape[0]/inp['batch_size']))
-    optimizer = Adam_LBFGS(model.parameters(), no_switch_step)
+        if inp['switch_step_percentage'] == 1:
+            no_switch_step = inp['num_epochs'] * math.ceil(data['X_train_tt'].shape[0] / inp['batch_size'])
+    optimizer = Adam_LBFGS(inp, model.parameters(), no_switch_step)
     return optimizer
 
 def scheduler_setup(inp:dict, optimizer:Adam_LBFGS):
@@ -307,7 +314,8 @@ def loss_setup(inp:dict):
     'HuberLoss': nn.HuberLoss,
     'MSLELoss': MSLELoss,
     'wMSELoss': wMSELoss,
-    'RMSELoss': RMSELoss
+    'RMSELoss': RMSELoss,
+    'RelMSELoss': RelMSELoss,
     }
 
     lossFn = loss_mapping[inp['loss_type']]()

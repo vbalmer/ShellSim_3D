@@ -5,17 +5,18 @@ inp = {
     'input_size': 6,                                # 6 + GEOM_SIZE
     'out_size': 6,                                  # 6
     'hidden_layers': str([1024]*5),
-    'batch_size': 8192,                             # Can be defined here, if None: runs with single-batch
-    'num_epochs': 300,
+    'batch_size': 4096,                             # Can be defined here, if None: runs with single-batch
+    'num_epochs': 150,
     'switch_step_percentage': 1,                    # Percentage after which to switch to LBFGS instead of Adam 
     'activation': 'ELU',
-    'learning_rate': 0.005,
+    'learning_rate': 0.001,
     'lr_scheduler':'standard',                      # 'standard': the one used by mike; 'plateau': reduceLRonPlateau
     'dropout_rate': 0,
     'BatchNorm': False,
     'num_samples': 5, 
     'fourier_mapping': False,  
-    'loss_type': 'MSELoss',                         # can be 'MSELoss', 'HuberLoss', 'MSLELoss', 'wMSELoss', 'RMSELoss'                   
+    'loss_type': 'MSELoss',                         # can be 'MSELoss', 'HuberLoss', 'MSLELoss', 'wMSELoss', 'RMSELoss'   
+    'loss_type_D': None,                            # if None: same as loss_type
 
     # Network type (Sobolev, Pretrained, DeepONet, MoE)          
     'w_s': str([0.9,0.1]),                          # weights [w1, w2] for 1st, 2nd order loss with sobolev (neglected if sobolev = False), or 'max'

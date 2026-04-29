@@ -7,6 +7,7 @@ from torch import vmap
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print('GPU device name: ', torch.cuda.get_device_name(torch.cuda.current_device()))
 
 ############################################### Loss classes ###############################################
 
@@ -45,6 +46,15 @@ class wMSELoss(nn.Module):
         loss = torch.mean(loss_ind)
         return loss
     
+class RelMSELoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mse = nn.MSELoss()
+    
+    def forward(self, y, y_hat, epsilon = 1):
+        loss = torch.mean(((y-y_hat) / (y.abs() + epsilon))**2)
+        return loss
+    
 
 loss_mapping = {
     'MSELoss': nn.MSELoss,
@@ -52,6 +62,7 @@ loss_mapping = {
     'MSLELoss': MSLELoss,
     'wMSELoss': wMSELoss,
     'RMSELoss': RMSELoss,
+    'RelMSELoss': RelMSELoss,
 }
 
 
@@ -147,14 +158,16 @@ class Adam_LBFGS(torch.optim.Optimizer):
     """
 
     def __init__(self,
+                 inp,
                  params,
                  switch_step,
                  lbfgs_params=None,
-                 adam_hyper={"lr": 1e-3, "betas": (0.9, 0.99)},
+                 adam_hyper={"betas": (0.9, 0.99)},
                  lbfgs_hyper={"lr": 1., "max_iter": 20, "history_size": 100}):
         self._params = list(params)
         self.switch_step = switch_step
-        self.adam = torch.optim.AdamW(self._params, **adam_hyper)
+        self.inp = inp
+        self.adam = torch.optim.AdamW(self._params, lr = self.inp['learning_rate'], **adam_hyper, )
         self.lbfgs = torch.optim.LBFGS(self._params if lbfgs_params is None else lbfgs_params, **lbfgs_hyper)
         defaults = {}
         super().__init__(self._params, defaults)
@@ -233,7 +246,11 @@ class CustomLosses:
         if len(J.shape)>3:
             J = J.squeeze(1)
         # to calculate the loss directly based on the entire stiffness matrix (including the values that should be zero)
-        loss2 = self.criterion(J[:,:sz,:sz], labels[:,sz:].reshape(-1,sz,sz))
+        if self.inp['loss_type_D'] == None:
+            loss2 = self.criterion(J[:,:sz,:sz], labels[:,sz:].reshape(-1,sz,sz))
+        else: 
+            criterion2 = loss_mapping[self.inp['loss_type_D']]()
+            loss2 = criterion2(J[:,:sz,:sz], labels[:,sz:].reshape(-1,sz,sz))
 
         return loss2
     

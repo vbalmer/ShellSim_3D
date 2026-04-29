@@ -61,9 +61,10 @@ save_test_data(train_eval_test_data)
 
 ############################ 4 - Train              ############################
 
+
 training_wrapper(torch_data,  inp, 
-                 save_path = 'training\\config', 
-                 save_folder = SAVE_FOLDER, sweep = SWEEP)
+                save_path = 'training\\config', 
+                save_folder = SAVE_FOLDER, sweep = SWEEP)
 
 
 ############################ 5 - Test              ############################

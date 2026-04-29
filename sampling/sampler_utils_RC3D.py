@@ -34,7 +34,7 @@ def get_constant_sampling_params(sample_2d:bool) -> tuple:
 
     c = {
         'n_samples_2D': 1e6, 
-        'n_samples_3D': 17e6,         #4e9,47e3 (for 6 elements per dimension), 64e6 (20 elements per dimension)
+        'n_samples_3D': 6e6,         #4e9,47e3 (for 6 elements per dimension), 64e6 (20 elements per dimension)
 
         'min': [-3e-3]*2 + [-4e-3],
         'max': [5e-3]*2  + [4e-3],
@@ -74,18 +74,23 @@ def get_constant_sampling_params(sample_2d:bool) -> tuple:
     return c, mat_dict
 
 
-def sample_eps(sampler:str, constants: dict) -> np.array:
+def sample_eps(sampler:str, constants: dict, sampler_type_log = 'lhs', zero_value_epsx = 0.5e-6) -> np.array:
     """
     Samples 2D-strains.
     
     Args: 
-        sampler      (str) : uniform, uniform_3D, log or LHS - so far only uniform implemented.
-        constants    (dict): material and geom constants, amount of samples
+        sampler             (str) : uniform, uniform_3D, log or LHS
+        constants           (dict): material and geom constants, amount of samples
+        sampler_type_log    (str):  if log-sampler, select sampler with which log-data is sampled (lhs or uniform_3D_grouped)
+        zero_value_epsx     (float): value allocated to eps_x = 0 in case of log-sampling (mostly not == 0)
 
     Returns: 
         eps_l (np.arr): eps_layer for one layer (n_samples_2D, 3)
     
     """
+
+    # Sample points
+
     if sampler == 'uniform':
         t0 = time.perf_counter()
         par_names = ['eps_x', 'eps_y', 'eps_xy']
@@ -113,11 +118,145 @@ def sample_eps(sampler:str, constants: dict) -> np.array:
         t_elapsed = time.perf_counter() - t0
         print(f'3D Sampling done in {t_elapsed/60:.2f}min')
 
+    elif sampler == 'lhs':
+        t0 = time.perf_counter()
+        par_names = ['eps_x', 'eps_y', 'eps_xy', 'chi_x', 'chi_y', 'chi_xy']
+        lhs_sampler = samplers(par_names, constants['min'], constants['max'], samples= constants['n_samples_3D'])
+        data = lhs_sampler.lhs(criterion = 'c')
+        print(f'Sampled {int(constants["n_samples_3D"]/1e9)}*1e9 values for 3D-epsilon')
+        t_elapsed = time.perf_counter() - t0
+        print(f'3D Sampling with LHS done in {t_elapsed/60:.2f}min')
+
+    elif sampler == 'combined_lhs_uniform':
+        half_samples = int(constants['n_samples_3D']/2)
+
+        t0 = time.perf_counter()
+        par_names = ['eps_x', 'eps_y', 'eps_xy', 'chi_x', 'chi_y', 'chi_xy']
+        lhs_sampler = samplers(par_names, constants['min'], constants['max'], samples= half_samples)
+        data_0 = lhs_sampler.lhs(criterion = 'c')
+        print(f'Sampled {int(half_samples/1e9)}*1e9 values for 3D-epsilon')
+        t_elapsed_0 = time.perf_counter() - t0
+        print(f'3D Sampling with LHS done in {t_elapsed_0/60:.2f}min')
+
+        t1 = time.perf_counter()
+        uniform_sampler = samplers(par_names, constants['min'], constants['max'], samples= half_samples)
+        data_1 = uniform_sampler.uniform_multi_grouped()
+        print(f'Sampled {int(half_samples/1e9)}*1e9 values for 3D-epsilon')
+        t_elapsed_1 = time.perf_counter() - t1
+        print(f'3D Sampling uniformly done in {t_elapsed_1/60:.2f}min')
+
+        data = np.concatenate((data_0, data_1), axis = 0)
+
+    elif sampler == 'log-sampler':
+        data_, max_log_neg, max_log_pos = sample_exponents(constants, sampler_type_log, zero_value_epsx)
+        data = convert_log_data_to_eps(data_, max_log_neg, max_log_pos)                                                                               # TODO: Write function
+
+    elif sampler == 'combined_log_uniform':
+        half_samples = int(constants['n_samples_3D']/2)
+
+        data_, max_log_neg, max_log_pos = sample_exponents(constants, sampler_type_log, zero_value_epsx, num_samples = half_samples)
+        data_0 = convert_log_data_to_eps(data_, max_log_neg, max_log_pos) 
+
+        t1 = time.perf_counter()
+        par_names = ['eps_x', 'eps_y', 'eps_xy', 'chi_x', 'chi_y', 'chi_xy']
+        uniform_sampler = samplers(par_names, constants['min'], constants['max'], samples= half_samples)
+        data_1 = uniform_sampler.uniform_multi_grouped()
+        print(f'Sampled {int(half_samples/1e9)}*1e9 values for 3D-epsilon')
+        t_elapsed_1 = time.perf_counter() - t1
+        print(f'3D Sampling uniformly done in {t_elapsed_1/60:.2f}min')
+
+        data = np.concatenate((data_0, data_1), axis = 0)
+    
     else: 
         raise UserWarning('This has not yet been implemented.')
+    
+
+    # Check smallest value and increase if required
+    data = filter_small_epsilon(data)
 
     return data
 
+
+def convert_log_data_to_eps(data_, max_log_neg, max_log_pos):
+    """
+    Converts sampled exponents (data_) into values of epsilon.
+    
+    Args: 
+        data_       (np.arr): Contains sampled exponents
+    
+    Returns: 
+        data        (np.arr): Contains values of epsilon
+    """
+    exp = 10
+
+    # calculate real epsilon values (absolute values)
+    eps_no_sign = exp**(data_)
+
+    # get mask and assign (+) or (-) sign to epsilon values
+    mask_sign = ~((data_ < max_log_pos) & (data_ > max_log_neg))        # see sketch hand notes, 27.04.2026
+    sign_eps = np.random.randint(0,2, size = eps_no_sign.shape)
+    sign_eps[sign_eps==0] = -1
+
+    # collect epsilon values with added sign into one data array
+    data = eps_no_sign.copy()
+    data[mask_sign] = sign_eps[mask_sign]*eps_no_sign[mask_sign]
+
+
+    return data
+
+def sample_exponents(constants, sampler_type_log, zero_value_epsx, num_samples = None):
+    """
+    sampling exponent instead of epsilon directly. 
+    """
+
+    t = constants['t']
+    zero_vec = [zero_value_epsx]*2+[zero_value_epsx/10]+[zero_value_epsx/(t/2)]*2 + [(zero_value_epsx*10e-1)/(t/2)]
+
+    min = constants['min']
+    max = constants['max']
+    max_log_neg = np.log10([abs(x) for x in min])
+    max_log_pos = np.log10([abs(x) for x in max])
+
+    min_log = np.log10(zero_vec)
+    max_log = np.maximum(max_log_neg, max_log_pos)
+
+
+    if num_samples is not None:
+        n_samples = num_samples
+    else: 
+        n_samples = constants['n_samples_3D']
+
+
+    t0 = time.perf_counter()
+    par_names = ['eps_x', 'eps_y', 'eps_xy', 'chi_x', 'chi_y', 'chi_xy']
+    if sampler_type_log == 'lhs': 
+        lhs_sampler = samplers(par_names, min_log, max_log, samples= n_samples)
+        data = lhs_sampler.lhs(criterion = 'c')
+        print(f'Sampled {int(n_samples/1e9)}*1e9 values for 3D-epsilon')
+        t_elapsed = time.perf_counter() - t0
+        print(f'3D Sampling exponents with LHS done in {t_elapsed/60:.2f}min')
+    elif sampler_type_log == 'uniform_3D_grouped': 
+        uniform_sampler = samplers(par_names, min_log, max_log, samples= n_samples)
+        data = uniform_sampler.uniform_multi_grouped()
+        print(f'Sampled {int(n_samples/1e9)}*1e9 values for 3D-epsilon')
+        t_elapsed = time.perf_counter() - t0
+        print(f'3D Sampling exponents uniformly done in {t_elapsed/60:.2f}min')
+    else:   
+        raise UserWarning('Please choose either lhs or uniform_3D_grouped as sampler for log sampling.')
+    
+    return data, max_log_neg, max_log_pos
+
+def filter_small_epsilon(data, threshold = 1e-10):
+    """
+    filters out small values of epsilon to avoid large stiffness values. 
+
+    """
+    mask = abs(data) < threshold
+    print(f'Detected {np.sum(mask)} points below threshold of {threshold}')
+    data[mask] = threshold
+    
+
+    return data
 
 class samplers:
     def __init__(self, parnames, min, max, samples):
@@ -130,37 +269,32 @@ class samplers:
         """
         Returns LHS samples.
 
-        :param parnames: List of parameter names
-        :type parnames: list(str)
-        :param bounds: List of lower/upper bounds,
-                        must be of the same length as par_names
-        :type bounds: list(tuple(float, float))
-        :param int samples: Number of samples
-        :param str criterion: A string that tells lhs how to sample the
-                                points. See docs for pyDOE.lhs().
-        :return: DataFrame
+        Args:
+            min        list:        List of lower bounds
+            max        list:        List of upper bounds 
+            samples     int:        Amount of samples
+            criterion   str:        A string that tells lhs how to sample the points. See docs for pyDOE.lhs().
+        
+        Returns:
+            points      np.arr:    Sampled points
         """
-        raise UserWarning('This code is not yet implemented. Please check # TODO')
+        dim = len(self.min)
+        n_i = int(np.round((self.samples)**(1/dim), 0))
+
         bounds = np.vstack((self.min, self.max))
         bounds = bounds.T
         
 
-        lhs = doe.lhs(len(self.parnames), samples=self.samples, criterion=criterion)
-        par_vals = {}
-        for par, i in zip(self.parnames, range(len(self.parnames))):
+        lhs = doe.lhs(dim, samples=n_i**dim, criterion=criterion)
+        par_vals = np.zeros((n_i**dim,dim))
+        for i in range(dim):
             par_min = bounds[i][0]
             par_max = bounds[i][1]
-            par_vals[par] = np.array(lhs[:, i]) * (par_max - par_min) + par_min
+            par_vals[:,i] = np.array(lhs[:, i]) * (par_max - par_min) + par_min
 
-        # Convert dict(str: np.ndarray) to pd.DataFrame 
-        # TODO: remove this. get data in np format directly.
-        
-        par_df = pd.DataFrame(columns=self.parnames, index=np.arange(int(self.samples)))
-        for i in range(self.samples):
-            for p in self.parnames:
-                par_df.loc[i, p] = par_vals[p][i]
+        points = np.array(par_vals)
 
-        return par_df
+        return points
     
     def uniform(self):
         n_i = int(np.round((self.samples)**(1/3),0))

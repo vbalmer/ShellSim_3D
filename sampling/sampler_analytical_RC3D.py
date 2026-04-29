@@ -17,7 +17,8 @@ PLOT_D = True
 SAVE_D = True
 BATCHWISE = True
 FILTER_DATA = True
-LOG_WANDB =  True
+LOG_WANDB =  False
+SAMPLING_TYPE = 'combined_log_uniform'          # can be: uniform, uniform_3D, uniform_3D_grouped*, lhs, combined_lhs_uniform or log
 
 
 
@@ -42,7 +43,7 @@ if SAMPLE_2D:
 
 else:
     # 1.1 - sample 3D generalised strains
-    eps_g = sample_eps(sampler = 'uniform_3D_grouped', constants = constants)
+    eps_g = sample_eps(sampler = SAMPLING_TYPE, constants = constants)
     eps_g[:,2] = eps_g[:,2]*2   #converting eps_xy to gamma_xy
 
     
@@ -75,7 +76,7 @@ if not BATCHWISE:
 else: 
 
     # 2.1 - 2.4 Find generalised stresses and stiffnesses    
-    sig_g, dh = sig_simulation_batchwise(cp.asarray(eps_g), simulatesig, cm, mat_dict, n_batches = 17)
+    sig_g, dh = sig_simulation_batchwise(cp.asarray(eps_g), simulatesig, cm, mat_dict, n_batches = 6)
 
     # 2.5 Save generalised stresses
     save_3D_data(sig_g, save_data_dir, filename = 'sig_g')
