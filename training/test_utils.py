@@ -649,7 +649,7 @@ def save_diag_figure(save_path, transf, filename = 'multi_diag_scatter', id = No
     return
 
 def copy_figures(src_folder, copy_path):
-    dst_folder = os.path.join(os.getcwd(), copy_path[0]+'\\v_'+str(copy_path[1]))
+    dst_folder = os.path.join(os.getcwd(), copy_path[0], f"v_{copy_path[1]}")
     plots_dir = os.path.join(dst_folder, "plots")
     os.makedirs(plots_dir, exist_ok=True)
     

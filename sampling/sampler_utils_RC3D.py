@@ -848,6 +848,40 @@ def get_mask_strains(eps_top, eps_bot, eps_range, gamma_range):
 
     return mask
 
+
+def filter_3D_data_batchwise(eps_g, sig_g, dh, constants, n_batches):
+
+    batch_size = int(eps_g.shape[0]/n_batches)
+    eps_list, sig_list, dh_list = [], [], []
+    n = eps_g.shape[0]
+
+    for i in range(n_batches):
+        start = i*batch_size
+        end = min(start + batch_size, n)
+        t0 = time.perf_counter()
+
+        eps_batch = eps_g[start:end]
+        sig_batch = sig_g[start:end]
+        dh_batch  = dh[start:end]
+
+        eps_f_b, sig_f_b, dh_f_b = filter_3d_data(eps_batch, sig_batch, dh_batch, constants)
+
+        eps_list.append(np.asarray(eps_f_b))
+        sig_list.append(np.asarray(sig_f_b))
+        dh_list.append(np.asarray(dh_f_b))
+    
+        eps_g_f = np.concatenate(eps_list, axis=0)
+        sig_g_f = np.concatenate(sig_list, axis=0)
+        dh_f    = np.concatenate(dh_list,  axis=0)
+
+        if i%10 == 0:
+            t_batch = time.perf_counter() - t0
+            print(f'Finished batch {i+1}/{n_batches} with batchsize = {batch_size} in {t_batch:.2f} sec.')
+
+    return eps_g_f, sig_g_f, dh_f
+
+
+
 '''
 #### Not in use ####
 

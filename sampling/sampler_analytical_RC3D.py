@@ -19,7 +19,7 @@ BATCHWISE = True
 FILTER_DATA = True
 # Set LOG_WANDB=1 in the environment to log this run to wandb (project sampler_3DRC).
 LOG_WANDB = os.environ.get('LOG_WANDB', '0').lower() in ('1', 'true', 'yes')
-SAMPLING_TYPE = 'combined_log_uniform'          # can be: uniform, uniform_3D, uniform_3D_grouped*, lhs, combined_lhs_uniform or log
+SAMPLING_TYPE = 'combined_lhs_uniform'          # can be: uniform, uniform_3D, uniform_3D_grouped*, lhs, combined_lhs_uniform or log
 
 
 
@@ -88,7 +88,7 @@ if not BATCHWISE:
 else: 
 
     # 2.1 - 2.4 Find generalised stresses and stiffnesses    
-    sig_g, dh = sig_simulation_batchwise(cp.asarray(eps_g), simulatesig, cm, mat_dict, n_batches = 6)
+    sig_g, dh = sig_simulation_batchwise(cp.asarray(eps_g), simulatesig, cm, mat_dict, n_batches = constants['n_samples_3D']//1000000)
 
     # 2.5 Save generalised stresses
     save_3D_data(sig_g, save_data_dir, filename = 'sig_g')
@@ -117,10 +117,13 @@ if SAVE_D:
 if FILTER_DATA:
     if SAMPLE_2D: 
         raise UserWarning('This function only applies to data sampled with 3D data.')
-    if eps_g.shape[0] > 17e6:
-        raise UserWarning('This function has no batchwise implementation yet.')
-    else:
+    if not BATCHWISE:
         eps_g_f, sig_g_f, D_f = filter_3d_data(eps_g, sig_g, dh, constants)
+        if SAVE_D: 
+            for data, name in zip([eps_g_f, sig_g_f, D_f],  ['eps_g', 'sig_g', 'D']):
+                save_3D_data(data, save_data_dir, filename = name)
+    else:
+        eps_g_f, sig_g_f, D_f = filter_3d_data_batchwise(eps_g, sig_g, dh, constants, n_batches = constants['n_samples_3D']//1000000)
         if SAVE_D: 
             for data, name in zip([eps_g_f, sig_g_f, D_f],  ['eps_g', 'sig_g', 'D']):
                 save_3D_data(data, save_data_dir, filename = name)

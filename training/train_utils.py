@@ -299,7 +299,7 @@ def optimizer_setup(inp:dict, data:dict, model: FFNN) -> Adam_LBFGS:
         no_switch_step = int(inp['switch_step_percentage']*inp['num_epochs'])
     else: 
         no_switch_step = int(inp['switch_step_percentage']*inp['num_epochs']*int(data['X_train_tt'].shape[0]/inp['batch_size']))
-        if inp['switch_step_percentage'] == 1:
+        if int(inp['switch_step_percentage']) == 1:
             no_switch_step = inp['num_epochs'] * math.ceil(data['X_train_tt'].shape[0] / inp['batch_size'])
     optimizer = Adam_LBFGS(inp, model.parameters(), no_switch_step)
     return optimizer
