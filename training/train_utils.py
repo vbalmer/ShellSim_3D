@@ -295,12 +295,13 @@ def simple_eval(inp, model, eval_loader, train_loader, lossFn, scheduler, epoch,
     return model, best_val_loss
 
 def optimizer_setup(inp:dict, data:dict, model: FFNN) -> Adam_LBFGS:
-    if inp['batch_size'] is None: 
+    if inp['switch_step_percentage'] == 1:
+        # Never switch to LBFGS — stay on Adam for the entire training run.
+        no_switch_step = float('inf')
+    elif inp['batch_size'] is None:
         no_switch_step = int(inp['switch_step_percentage']*inp['num_epochs'])
-    else: 
+    else:
         no_switch_step = int(inp['switch_step_percentage']*inp['num_epochs']*int(data['X_train_tt'].shape[0]/inp['batch_size']))
-        if int(inp['switch_step_percentage']) == 1:
-            no_switch_step = inp['num_epochs'] * math.ceil(data['X_train_tt'].shape[0] / inp['batch_size'])
     optimizer = Adam_LBFGS(inp, model.parameters(), no_switch_step)
     return optimizer
 
