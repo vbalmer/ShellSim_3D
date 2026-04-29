@@ -149,16 +149,47 @@ storage becomes the limit. GPU memory will become the bottleneck before that
 though -- the script already batches stress simulation (`n_batches=6`); raise
 that if you go above ~30M samples.
 
-## Moving the trained model elsewhere later
+## Where everything lives
 
-The model lives at `$MODEL_DIR` (default `$HOME/ShellSim3D/models/current`).
-Copy it wherever you need:
+Default paths on Euler (override with `DATA_DIR` / `MODEL_DIR` / `LOGS_DIR`):
+
+| What | Smoke run | Production run |
+|---|---|---|
+| Sampled HDF5 (`output_*.h5`) | `$SCRATCH/ShellSim3D/smoke/data/` | `$SCRATCH/ShellSim3D/data/` |
+| Model + configs (`*.pt`, `*.pkl`) | `$HOME/ShellSim3D/smoke/models/` | `$HOME/ShellSim3D/models/current/` |
+| Run archive (`v_<n>/`) | `$HOME/ShellSim3D/smoke/logs/` | `$HOME/ShellSim3D/models/logs/` |
+| Sampling plots (`*.png`) | `~/ShellSim_3D/sampling/plots/` | `~/ShellSim_3D/sampling/plots/` |
+| Training plots (`*.png`) | `~/ShellSim_3D/training/plots/` | `~/ShellSim_3D/training/plots/` |
+| SLURM stdout/stderr | `~/ShellSim_3D/euler/logs/smoke_*-<id>.{out,err}` | `~/ShellSim_3D/euler/logs/{sample,train}-<id>.{out,err}` |
+
+`$SCRATCH` is purged after ~15 days. `$HOME` is persistent but small (~45 GB
+quota). Copy anything you want to keep long-term to a group share or down to
+your local machine.
+
+### Copy sampled data elsewhere
 
 ```bash
-# Onto a group share for permanent storage:
+# To a group share on Euler (permanent, large quota):
+cp -r $SCRATCH/ShellSim3D/data /cluster/work/<group>/shellsim/
+
+# Down to your local machine (run from your remote desktop):
+rsync -avh --progress euler:'$SCRATCH/ShellSim3D/data/' ./local_data/
+
+# Single file only (e.g. just the filtered eps_g):
+scp euler:'$SCRATCH/ShellSim3D/data/output_eps_g.h5' ./
+```
+
+The single quotes around `$SCRATCH/...` matter -- they stop the local shell
+from expanding `$SCRATCH` (which only exists on Euler) before sending the
+command over.
+
+### Copy the trained model elsewhere
+
+```bash
+# To a group share on Euler:
 cp -r $HOME/ShellSim3D/models/current /cluster/work/<group>/shellsim/v_<n>
 
-# Down to your local machine via scp / rsync:
+# Down to your local machine:
 rsync -avh euler:ShellSim3D/models/current/ ./local_model/
 ```
 

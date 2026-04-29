@@ -8,6 +8,7 @@ VENV_DIR="${VENV_DIR:-$HOME/venvs/shellsim}"
 module load stack/2024-06
 module load python_cuda/3.11.6
 module load eth_proxy
+module load texlive            # for matplotlib rcParams['text.usetex']=True
 
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"

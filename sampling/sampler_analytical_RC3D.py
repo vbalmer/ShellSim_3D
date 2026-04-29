@@ -17,7 +17,8 @@ PLOT_D = True
 SAVE_D = True
 BATCHWISE = True
 FILTER_DATA = True
-LOG_WANDB =  False
+# Set LOG_WANDB=1 in the environment to log this run to wandb (project sampler_3DRC).
+LOG_WANDB = os.environ.get('LOG_WANDB', '0').lower() in ('1', 'true', 'yes')
 SAMPLING_TYPE = 'combined_log_uniform'          # can be: uniform, uniform_3D, uniform_3D_grouped*, lhs, combined_lhs_uniform or log
 
 
