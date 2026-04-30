@@ -575,9 +575,14 @@ def load_test_sample(path_data: str,
                      sobolev: bool,
                      test_indices: np.ndarray,
                      n_sample: int = 500_000,
+                     chunk_size: int = 1_000_000,
                      seed: int = SEED) -> dict:
     """
     Load a random subsample from the test split (raw, un-normalised).
+
+    Uses a sequential chunked scan with searchsorted to avoid slow HDF5
+    fancy indexing. Only rows matching `chosen` are kept per chunk.
+
     Returns {'X_test': np.ndarray, 'y_test': np.ndarray}, compatible with
     save_test_data() and test_NN_model().
     """
@@ -587,19 +592,41 @@ def load_test_sample(path_data: str,
                    replace=False).astype(np.int64)
     )
 
-    with h5py.File(os.path.join(path_data, 'output_eps_g.h5'), 'r') as f:
-        X = f['eps_g'][chosen].astype(np.float32)
-    with h5py.File(os.path.join(path_data, 'output_sig_g.h5'), 'r') as f:
-        y_sig = f['sig_g'][chosen].astype(np.float32)
+    n_total = get_dataset_size(path_data)
+    n_chunks = math.ceil(n_total / chunk_size)
 
+    X_list: list = []
+    y_sig_list: list = []
+    y_D_list: list = []
+
+    for ci in range(n_chunks):
+        chunk_start = ci * chunk_size
+        chunk_end   = min(chunk_start + chunk_size, n_total)
+
+        lo = int(np.searchsorted(chosen, chunk_start))
+        hi = int(np.searchsorted(chosen, chunk_end))
+        if lo >= hi:
+            continue
+
+        local_idx = chosen[lo:hi] - chunk_start
+
+        with h5py.File(os.path.join(path_data, 'output_eps_g.h5'), 'r') as f:
+            X_list.append(f['eps_g'][chunk_start:chunk_end][local_idx].astype(np.float32))
+        with h5py.File(os.path.join(path_data, 'output_sig_g.h5'), 'r') as f:
+            y_sig_list.append(f['sig_g'][chunk_start:chunk_end][local_idx].astype(np.float32))
+        if sobolev:
+            with h5py.File(os.path.join(path_data, 'output_D.h5'), 'r') as f:
+                n_c = hi - lo
+                y_D_list.append(f['D'][chunk_start:chunk_end][local_idx].reshape(n_c, -1).astype(np.float32))
+
+    X     = np.concatenate(X_list,     axis=0)
+    y_sig = np.concatenate(y_sig_list, axis=0)
     if sobolev:
-        with h5py.File(os.path.join(path_data, 'output_D.h5'), 'r') as f:
-            y_D = f['D'][chosen].reshape(len(chosen), -1).astype(np.float32)
-        y = np.concatenate([y_sig, y_D], axis=1)
+        y = np.concatenate([y_sig, np.concatenate(y_D_list, axis=0)], axis=1)
     else:
         y = y_sig
 
-    print(f'[test-sample] Loaded {len(chosen) / 1e6:.2f} M test points.')
+    print(f'[test-sample] Loaded {len(X) / 1e6:.2f} M test points.')
     return {'X_test': X, 'y_test': y}
 
 
