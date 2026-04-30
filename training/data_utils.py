@@ -470,18 +470,22 @@ def compute_stats_full_dataset(path_data: str,
     n_chunks = math.ceil(n_total / chunk_size)
     rng = np.random.default_rng(seed)
 
-    # Pre-select reservoir indices (sorted for sequential HDF5 reads later).
+    # Pre-select reservoir indices (sorted so we can use searchsorted during
+    # the single sequential pass below — no second HDF5 read needed).
     res_idx = np.sort(
         rng.choice(n_total, size=min(percentile_n_samples, n_total),
                    replace=False).astype(np.int64)
     )
 
-    # ── first pass: exact mean / variance (Chan) + running max / min ──────────
+    # ── single pass: exact mean / variance (Chan) + running max / min
+    #                + reservoir rows collected on-the-fly via searchsorted ────
     count = 0
     mean_X = mean_y = M2_X = M2_y = None
     max_X  = max_y  = min_X = min_y = None
+    res_X_list: list = []
+    res_y_list: list = []
 
-    print(f'[stats] Scanning {n_total / 1e9:.2f} B samples in {n_chunks} chunks ...')
+    print(f'[stats] Scanning {n_total / 1e6:.1f} M samples in {n_chunks} chunks ...')
     for ci in range(n_chunks):
         chunk_start = ci * chunk_size
         chunk_end   = min(chunk_start + chunk_size, n_total)
@@ -497,6 +501,14 @@ def compute_stats_full_dataset(path_data: str,
             y_c = np.concatenate([y_sig_c, y_D_c], axis=1)
         else:
             y_c = y_sig_c
+
+        # Collect reservoir rows that fall inside this chunk (no random seeks).
+        lo = int(np.searchsorted(res_idx, chunk_start))
+        hi = int(np.searchsorted(res_idx, chunk_end))
+        if lo < hi:
+            local_idx = res_idx[lo:hi] - chunk_start
+            res_X_list.append(X_c[local_idx].astype(np.float32))
+            res_y_list.append(y_c[local_idx].astype(np.float32))
 
         # Chunk statistics
         mX_b = X_c.mean(axis=0);  M2X_b = ((X_c - mX_b) ** 2).sum(axis=0)
@@ -525,23 +537,15 @@ def compute_stats_full_dataset(path_data: str,
 
         count += n_c
         if (ci + 1) % 500 == 0 or ci == n_chunks - 1:
-            print(f'[stats]   {count / 1e9:.2f} B / {n_total / 1e9:.2f} B samples ...')
+            print(f'[stats]   {count / 1e6:.1f} M / {n_total / 1e6:.1f} M samples ...')
 
     std_X = np.sqrt(M2_X / (count - 1))
     std_y = np.sqrt(M2_y / (count - 1))
 
-    # ── second pass: reservoir sample for percentiles + log stats ─────────────
-    print('[stats] Loading reservoir sample for percentiles ...')
-    with h5py.File(os.path.join(path_data, 'output_eps_g.h5'), 'r') as f:
-        X_res = f['eps_g'][res_idx].astype(np.float32)
-    with h5py.File(os.path.join(path_data, 'output_sig_g.h5'), 'r') as f:
-        y_sig_res = f['sig_g'][res_idx].astype(np.float32)
-    if sobolev:
-        with h5py.File(os.path.join(path_data, 'output_D.h5'), 'r') as f:
-            y_D_res = f['D'][res_idx].reshape(len(res_idx), -1).astype(np.float32)
-        y_res = np.concatenate([y_sig_res, y_D_res], axis=1)
-    else:
-        y_res = y_sig_res
+    # Assemble reservoir arrays (already collected during the pass above).
+    X_res   = np.concatenate(res_X_list, axis=0) if res_X_list else np.empty((0, mean_X.shape[0]), dtype=np.float32)
+    y_res   = np.concatenate(res_y_list, axis=0) if res_y_list else np.empty((0, mean_y.shape[0]), dtype=np.float32)
+    print(f'[stats] Reservoir collected: {len(X_res) / 1e6:.2f} M points.')
 
     delta = 1e-8
     log_X   = np.log(X_res   + np.abs(min_X.astype(np.float32))   + delta)
