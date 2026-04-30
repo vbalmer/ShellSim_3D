@@ -693,7 +693,14 @@ class HDF5StreamingDataset(torch.utils.data.IterableDataset):
         scan_start = int(indices[0])
         scan_end   = int(indices[-1]) + 1
 
-        for chunk_start in range(scan_start, scan_end, self.chunk_size):
+        chunk_starts = list(range(scan_start, scan_end, self.chunk_size))
+        # Shuffle chunk visit order each epoch so the model sees data regions
+        # in a different sequence every pass — equivalent to global shuffling
+        # without loading all data into memory.
+        if self.shuffle:
+            np.random.shuffle(chunk_starts)
+
+        for chunk_start in chunk_starts:
             chunk_end = min(chunk_start + self.chunk_size, scan_end)
 
             lo = int(np.searchsorted(indices, chunk_start))
