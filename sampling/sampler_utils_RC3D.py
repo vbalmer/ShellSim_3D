@@ -1,6 +1,7 @@
 # vb, 06.03.2026
 
 import os
+import math
 import numpy as np
 import cupy as cp
 import pyDOE as doe
@@ -12,10 +13,10 @@ import matplotlib.pyplot as plt
 
 try:
     from .concrete_classes import dict_CC
-    from .simulating_sig_vec_RC3D import SigSimulator
+    from .simulating_sig_vec_RC3D import SigSimulator, sig_simulation_batchwise
 except ImportError:
     from concrete_classes import dict_CC
-    from simulating_sig_vec_RC3D import SigSimulator
+    from simulating_sig_vec_RC3D import SigSimulator, sig_simulation_batchwise
 
 
 ########################################## Sampling strains ##########################################
@@ -72,6 +73,29 @@ def get_constant_sampling_params(sample_2d:bool) -> tuple:
     mat_dict = dict_CC_one
 
     return c, mat_dict
+
+
+def setup_sampler_dirs(constants: dict) -> tuple:
+    """
+    Apply the N_SAMPLES_3D env-var override (if set) and resolve the output
+    directory from DATA_DIR (falls back to the local Windows path for dev runs).
+
+    Args:
+        constants (dict): sampling constants as returned by get_constant_sampling_params.
+
+    Returns:
+        constants     (dict): same dict, with n_samples_3D updated if overridden.
+        save_data_dir (str):  resolved output directory (created if it does not exist).
+    """
+    if os.environ.get('N_SAMPLES_3D'):
+        constants['n_samples_3D'] = int(float(os.environ['N_SAMPLES_3D']))
+        print(f"[sampler] N_SAMPLES_3D override -> {constants['n_samples_3D']:,}")
+
+    save_data_dir = os.environ.get('DATA_DIR') or os.path.join('D:\\', 'VeraBalmer', 'ShellSim3D')
+    os.makedirs(save_data_dir, exist_ok=True)
+    print(f'[sampler] Saving data to: {save_data_dir}')
+
+    return constants, save_data_dir
 
 
 def sample_eps(sampler:str, constants: dict, sampler_type_log = 'lhs', zero_value_epsx = 0.5e-6) -> np.array:
@@ -540,6 +564,126 @@ def save_3D_data(data_:np.array, save_dir:str, filename:str):
         f.create_dataset(filename,     data = data_,     dtype='float32')
     print(f'time save_data {filename}: {(time.perf_counter()-t2)/60:.2f}min')
 
+
+def save_3D_data_append(data_: np.ndarray, save_dir: str, filename: str):
+    """
+    Append rows to an HDF5 dataset, creating it (with an unlimited first axis)
+    on the first call and resizing on every subsequent call.
+
+    Replaces save_3D_data() for the chunked sampling pipeline so that only
+    one chunk of data needs to be in RAM at a time.
+
+    Args:
+        data_     (np.ndarray): Chunk to append. Shape (n_chunk, ...).
+        save_dir  (str):        Directory containing the HDF5 files.
+        filename  (str):        Dataset name, e.g. 'eps_g', 'sig_g', 'D'.
+    """
+    t0   = time.perf_counter()
+    path = os.path.join(save_dir, f'output_{filename}.h5')
+    data_f32 = np.asarray(data_).astype(np.float32)
+
+    with h5py.File(path, 'a') as f:
+        if filename in f:
+            ds       = f[filename]
+            old_size = ds.shape[0]
+            ds.resize(old_size + data_f32.shape[0], axis=0)
+            ds[old_size:] = data_f32
+        else:
+            maxshape = (None,) + data_f32.shape[1:]
+            f.create_dataset(filename, data=data_f32,
+                             maxshape=maxshape, dtype='float32',
+                             chunks=True)
+
+    print(f'[save] appended {data_f32.shape[0]:,} rows to {filename}.h5  '
+          f'({(time.perf_counter()-t0)/60:.2f} min)')
+
+
+def run_chunked_sampling(
+    constants: dict,
+    mat_dict: dict,
+    save_data_dir: str,
+    simulatesig,
+    cm: int,
+    sampling_type: str,
+    chunk_size: int,
+    filter_data: bool = True,
+    save_D: bool = True,
+) -> tuple:
+    """
+    Full chunked sampling loop: sample → simulate → filter → append to HDF5.
+
+    Iterates over the total requested samples in chunks of `chunk_size` so that
+    only ~1.7 GB of CPU RAM is needed at any one time, regardless of the total
+    dataset size.  GPU memory is freed after every chunk.
+
+    Stale output HDF5 files are removed at the start so appending always begins
+    from an empty file.
+
+    Args:
+        constants     (dict):  sampling constants (must contain 'n_samples_3D').
+        mat_dict      (dict):  material parameter dict.
+        save_data_dir (str):   directory where the HDF5 files are written.
+        simulatesig          : SigSimulator instance.
+        cm            (int):   cross-section model index passed to the simulator.
+        sampling_type (str):   sampler name, e.g. 'combined_lhs_uniform'.
+        chunk_size    (int):   number of samples per chunk.
+        filter_data   (bool):  if True, apply filter_3d_data to each chunk.
+        save_D        (bool):  if True, also append the stiffness tensor D to disk.
+
+    Returns:
+        eps_g_last (np.ndarray | None): filtered strains from the last chunk.
+        sig_g_last (np.ndarray | None): filtered stresses from the last chunk.
+        D_last     (np.ndarray | None): filtered stiffness from the last chunk.
+        All three are None if n_total == 0.
+    """
+    n_total  = constants['n_samples_3D']
+    n_chunks = math.ceil(n_total / chunk_size)
+
+    # Remove any stale output files so appending always starts clean.
+    for _name in ['eps_g', 'sig_g', 'D']:
+        _p = os.path.join(save_data_dir, f'output_{_name}.h5')
+        if os.path.exists(_p):
+            os.remove(_p)
+            print(f'[sampler] Removed existing {_name}.h5')
+
+    eps_g_last = sig_g_last = D_last = None
+
+    for chunk_i in range(n_chunks):
+        chunk_n = min(chunk_size, n_total - chunk_i * chunk_size)
+        print(f'\n[sampler] ── Chunk {chunk_i + 1}/{n_chunks}  '
+              f'({chunk_n / 1e6:.1f} M samples) ──')
+
+        # 1 - Sample strains
+        constants_chunk = {**constants, 'n_samples_3D': chunk_n}
+        eps_g = sample_eps(sampler=sampling_type, constants=constants_chunk)
+        eps_g[:, 2] = eps_g[:, 2] * 2          # eps_xy → gamma_xy
+
+        # 2 - Simulate stresses & stiffness
+        n_sub = max(1, chunk_n // 1_000_000)
+        sig_g, dh = sig_simulation_batchwise(
+            cp.asarray(eps_g), simulatesig, cm, mat_dict, n_batches=n_sub
+        )
+
+        # 3 - Filter
+        if filter_data:
+            eps_g_f, sig_g_f, D_f = filter_3d_data(eps_g, sig_g, dh, constants)
+        else:
+            eps_g_f, sig_g_f, D_f = eps_g, sig_g, dh
+
+        # 4 - Append to HDF5
+        save_3D_data_append(eps_g_f, save_data_dir, filename='eps_g')
+        save_3D_data_append(sig_g_f, save_data_dir, filename='sig_g')
+        if save_D:
+            save_3D_data_append(D_f, save_data_dir, filename='D')
+
+        # Keep the last chunk in memory for post-loop visualisation.
+        eps_g_last, sig_g_last, D_last = eps_g_f, sig_g_f, D_f
+
+        # Free GPU and CPU memory before the next chunk.
+        del eps_g, sig_g, dh, eps_g_f, sig_g_f, D_f
+        cp.get_default_memory_pool().free_all_blocks()
+
+    return eps_g_last, sig_g_last, D_last
 
 
 ########################################## Visualising strains, stresses ##########################################

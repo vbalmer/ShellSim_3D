@@ -52,6 +52,7 @@ nvidia-smi || true
 
 # --- Run the sampler --------------------------------------------------------
 # The script uses bare imports of its sibling modules, so we cd into sampling/.
+export N_SAMPLES_3D=4000000000
 cd "$REPO_ROOT/sampling"
 python -u sampler_analytical_RC3D.py
 

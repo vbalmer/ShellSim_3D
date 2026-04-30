@@ -19,13 +19,14 @@ print(os.getpid())
 
 
 from architectures import *
+from test_utils import test_NN_model
 SEED = 42
 
 
 
 ########################################  wrapper functions ########################################
 
-def main_train(data: dict, save_path: str, config = None, project_name = 'ShellSim3D_sweep', save_folder = False):
+def main_train(data: dict, save_path: str, config = None, project_name = 'ShellSim3D_sweep', save_folder = False, streaming = False):
     """
     Main training function. 
 
@@ -62,7 +63,7 @@ def main_train(data: dict, save_path: str, config = None, project_name = 'ShellS
         # 2 - Train and evaluate model, save best evaluated model
         #________________________________________________________
 
-        model = simple_train(inp, model_dict, data, save_path)
+        model = simple_train(inp, model_dict, data, save_path, streaming=streaming)
         torch.save(model.state_dict(), os.path.join(save_path, 'last_trained_model.pt'))
         model.eval()
 
@@ -81,7 +82,79 @@ def main_train(data: dict, save_path: str, config = None, project_name = 'ShellS
 
     return inp
 
-def training_wrapper(data:dict, inp: dict, save_path:str, save_folder:str, sweep: bool) -> None:
+def setup_dirs() -> tuple:
+    """Resolve DATA_DIR / MODEL_DIR / LOGS_DIR from env vars or local defaults."""
+    path_data = os.environ.get('DATA_DIR') or os.path.join('D:\\', 'VeraBalmer\\ShellSim3D')
+    _here     = os.path.dirname(os.path.abspath(__file__))
+    MODEL_DIR = os.environ.get('MODEL_DIR') or os.path.join(_here, 'config')
+    LOGS_DIR  = os.environ.get('LOGS_DIR')  or os.path.join(_here, 'logs')
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    os.makedirs(LOGS_DIR,  exist_ok=True)
+    print(f'[train] DATA_DIR  = {path_data}')
+    print(f'[train] MODEL_DIR = {MODEL_DIR}')
+    print(f'[train] LOGS_DIR  = {LOGS_DIR}')
+    return path_data, MODEL_DIR, LOGS_DIR
+
+
+def setup_hyperparams(sobolev: bool) -> dict:
+    """Load config and apply any env-var overrides (NUM_EPOCHS, BATCH_SIZE, HIDDEN_LAYERS)."""
+    from config_inp import inp, constant_inp
+    inp['Sobolev']          = sobolev
+    constant_inp['Sobolev'] = sobolev
+    if os.environ.get('NUM_EPOCHS'):
+        inp['num_epochs']    = int(os.environ['NUM_EPOCHS'])
+        print(f'[train] NUM_EPOCHS override    -> {inp["num_epochs"]}')
+    if os.environ.get('BATCH_SIZE'):
+        inp['batch_size']    = int(os.environ['BATCH_SIZE'])
+        print(f'[train] BATCH_SIZE override    -> {inp["batch_size"]}')
+    if os.environ.get('HIDDEN_LAYERS'):
+        inp['hidden_layers'] = os.environ['HIDDEN_LAYERS']
+        print(f'[train] HIDDEN_LAYERS override -> {inp["hidden_layers"]}')
+    return inp
+
+
+def run_streaming_pipeline(path_data: str, MODEL_DIR: str, LOGS_DIR: str,
+                            inp: dict, sobolev: bool,
+                            save_folder: bool, sweep: bool) -> None:
+    """
+    Full training pipeline for datasets too large to fit in RAM.
+    Mirrors the section structure of the in-memory path in train.py.
+    """
+    from data_utils import (get_dataset_size, get_streaming_splits,
+                            compute_stats_full_dataset, load_test_sample,
+                            HDF5StreamingDataset)
+
+    #### 0 - Read data (meta only — no arrays loaded) ####
+    n_total = get_dataset_size(path_data)
+    print(f'[streaming] Total samples: {n_total / 1e9:.3f} B')
+
+    #### 1 - Train-Eval-Test Split ####
+    idx_train, idx_eval, idx_test = get_streaming_splits(n_total)
+
+    #### 2 - Normalisation (full-dataset pass for exact mean/std) ####
+    stats = compute_stats_full_dataset(path_data, sobolev)
+
+    #### 3 - Save config + test sample ####
+    save_inp(inp,   save_path=MODEL_DIR)
+    save_stats(stats, save_path=MODEL_DIR)
+    test_data = load_test_sample(path_data, sobolev, idx_test)
+    save_test_data(test_data, save_path=MODEL_DIR)
+
+    #### 4 - Train ####
+    stream_data = {
+        'train': HDF5StreamingDataset(path_data, stats, sobolev, idx_train, shuffle=True),
+        'eval':  HDF5StreamingDataset(path_data, stats, sobolev, idx_eval,  shuffle=False),
+    }
+    training_wrapper(stream_data, inp,
+                     save_path=MODEL_DIR,
+                     save_folder=save_folder, sweep=sweep,
+                     streaming=True)
+
+    #### 5 - Test ####
+    test_NN_model(test_data, stats, save_path=LOGS_DIR, version=None)
+
+
+def training_wrapper(data:dict, inp: dict, save_path:str, save_folder:str, sweep: bool, streaming: bool = False) -> None:
     """
     Wrapper around main train function, depending on whether to include sweep or not
 
@@ -102,7 +175,7 @@ def training_wrapper(data:dict, inp: dict, save_path:str, save_folder:str, sweep
         # Call function to train without sweep
         # _______________________________________
         inp_ = inp
-        inp = main_train(data, save_path, config = inp_, project_name = 'ShellSim3D', save_folder = save_folder)
+        inp = main_train(data, save_path, config = inp_, project_name = 'ShellSim3D', save_folder = save_folder, streaming = streaming)
 
     elif sweep:
         #________________________________________
@@ -146,7 +219,7 @@ def model_instance(inp:dict):
 
     return model_dict
 
-def simple_train(inp:dict, model_dict:dict, data:dict, save_path:str) -> FFNN:
+def simple_train(inp:dict, model_dict:dict, data:dict, save_path:str, streaming:bool = False) -> FFNN:
     """
     Setting up optimiser and model, as well as loaders depending on batch size.
     
@@ -165,38 +238,57 @@ def simple_train(inp:dict, model_dict:dict, data:dict, save_path:str) -> FFNN:
 
     model = model_dict['standard']
 
-    optimizer = optimizer_setup(inp, data, model)
-    
+    optimizer = optimizer_setup(inp, data, model, streaming=streaming)
+
     scheduler = scheduler_setup(inp, optimizer)
 
     lossFn = loss_setup(inp)
-    
+
     model.to(device)
 
     MAXEPOCHS = inp['num_epochs']
 
-    if inp['batch_size'] is None:
-        batch_size_train = data['X_train_tt'].shape[0]
-        batch_size_eval = data['X_eval_tt'].shape[0]
-    else: 
+    if streaming:
+        # data is {'train': HDF5StreamingDataset, 'eval': HDF5StreamingDataset}
+        if inp['batch_size'] is None:
+            raise ValueError('batch_size cannot be None in streaming mode.')
         batch_size_train = inp['batch_size']
-        batch_size_eval = inp['batch_size']
+        batch_size_eval  = inp['batch_size']
+        train_loader = DataLoader(data['train'], batch_size=batch_size_train,
+                                  num_workers=4, pin_memory=True)
+        eval_loader  = DataLoader(data['eval'],  batch_size=batch_size_eval,
+                                  num_workers=2, pin_memory=True)
+        # Cap eval batches per epoch so validation doesn't dominate wall time.
+        # Default: evaluate on at most 500 batches (= 500 * batch_size samples).
+        max_eval_batches = 500
+    else:
+        if inp['batch_size'] is None:
+            batch_size_train = data['X_train_tt'].shape[0]
+            batch_size_eval  = data['X_eval_tt'].shape[0]
+        else:
+            batch_size_train = inp['batch_size']
+            batch_size_eval  = inp['batch_size']
+        train_dataset = TensorDataset(data['X_train_tt'], data['y_train_tt'])
+        train_loader  = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True)
+        eval_dataset  = TensorDataset(data['X_eval_tt'], data['y_eval_tt'])
+        eval_loader   = DataLoader(eval_dataset,  batch_size=batch_size_eval,  shuffle=True)
+        max_eval_batches = None     # no cap for in-memory eval
 
-    train_dataset = TensorDataset(data['X_train_tt'], data['y_train_tt'])
-    train_loader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True)
-                            #   num_workers = 4, pin_memory = True, persistent_workers=True, prefetch_factor=2)
-    eval_dataset = TensorDataset(data['X_eval_tt'], data['y_eval_tt'])
-    eval_loader = DataLoader(eval_dataset, batch_size=batch_size_eval, shuffle = True)
-                            #  num_workers = 2, pin_memory = True, persistent_workers=True, prefetch_factor=2)
-    model = simple_train_aux_(train_loader, eval_loader, model, optimizer, scheduler, lossFn, MAXEPOCHS, save_path, inp)
+    model = simple_train_aux_(train_loader, eval_loader, model, optimizer, scheduler,
+                              lossFn, MAXEPOCHS, save_path, inp,
+                              max_eval_batches=max_eval_batches)
 
     return model
 
 
-def simple_train_aux_(train_loader, eval_loader, model, optimizer, scheduler, lossFn, MAXEPOCHS, save_path, inp):
+def simple_train_aux_(train_loader, eval_loader, model, optimizer, scheduler, lossFn, MAXEPOCHS, save_path, inp, max_eval_batches=None):
     """
     Actual training loop.
-    
+
+    Args:
+        max_eval_batches (int | None): If set, evaluation is capped at this many
+            batches per epoch. Useful for streaming datasets where the full eval
+            split is too large to iterate every epoch.
     """
     best_val_loss = float('inf')
     for epoch in range(MAXEPOCHS):
@@ -248,17 +340,19 @@ def simple_train_aux_(train_loader, eval_loader, model, optimizer, scheduler, lo
                 wandb.log({'Average train loss per epoch': avg_train_loss})
 
 
-        model, best_val_loss = simple_eval(inp, model, eval_loader, train_loader, lossFn, scheduler, epoch, MAXEPOCHS, best_val_loss, save_path)
+        model, best_val_loss = simple_eval(inp, model, eval_loader, train_loader, lossFn, scheduler, epoch, MAXEPOCHS, best_val_loss, save_path, max_eval_batches=max_eval_batches)
 
 
     return model
 
-def simple_eval(inp, model, eval_loader, train_loader, lossFn, scheduler, epoch, MAXEPOCHS, best_val_loss, save_path):
+def simple_eval(inp, model, eval_loader, train_loader, lossFn, scheduler, epoch, MAXEPOCHS, best_val_loss, save_path, max_eval_batches=None):
 
     epoch_val_loss = 0
     val_batch = 0
 
     for X_eval_batch, y_eval_batch in eval_loader:
+        if max_eval_batches is not None and val_batch >= max_eval_batches:
+            break
         X_eval, y_eval = X_eval_batch.to(device), y_eval_batch.to(device)
         model.eval()
         with torch.no_grad():
@@ -294,14 +388,15 @@ def simple_eval(inp, model, eval_loader, train_loader, lossFn, scheduler, epoch,
 
     return model, best_val_loss
 
-def optimizer_setup(inp:dict, data:dict, model: FFNN) -> Adam_LBFGS:
+def optimizer_setup(inp:dict, data:dict, model: FFNN, streaming: bool = False) -> Adam_LBFGS:
     if inp['switch_step_percentage'] == 1:
         # Never switch to LBFGS — stay on Adam for the entire training run.
         no_switch_step = float('inf')
     elif inp['batch_size'] is None:
         no_switch_step = int(inp['switch_step_percentage']*inp['num_epochs'])
     else:
-        no_switch_step = int(inp['switch_step_percentage']*inp['num_epochs']*int(data['X_train_tt'].shape[0]/inp['batch_size']))
+        n_train = len(data['train']) if streaming else data['X_train_tt'].shape[0]
+        no_switch_step = int(inp['switch_step_percentage']*inp['num_epochs']*int(n_train/inp['batch_size']))
     optimizer = Adam_LBFGS(inp, model.parameters(), no_switch_step)
     return optimizer
 

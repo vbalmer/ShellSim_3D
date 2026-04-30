@@ -1,12 +1,13 @@
 # vb, 25.03.2026
 
 import h5py
+import math
 import os
 import sys
 import time
 
 import numpy as np
-import matplotlib.pyplot as plt 
+import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 import torch
 
@@ -368,3 +369,311 @@ def figure_formatting(ax, i, filename):
             ax.set_xlabel('m_x')
             ax.set_ylabel('m_y')
             ax.set_zlabel('m_xy')
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Streaming / out-of-core data loading
+# Use when the dataset is too large to fit in RAM (> ~50 GB).
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_dataset_size(path_data: str) -> int:
+    """Return total number of samples by reading only the HDF5 header."""
+    with h5py.File(os.path.join(path_data, 'output_eps_g.h5'), 'r') as f:
+        return int(f['eps_g'].shape[0])
+
+
+def get_streaming_splits(n_total: int,
+                         test_size: float = 0.1,
+                         eval_size: float = 0.2,
+                         seed: int = SEED) -> tuple:
+    """
+    Return sorted index arrays for train / eval / test without loading any data.
+
+    Indices are shuffled once so each split covers the full data range, then
+    sorted so HDF5 reads are always sequential (fast I/O).
+
+    Returns:
+        idx_train, idx_eval, idx_test  —  np.ndarray, dtype int64, each sorted.
+    """
+    rng = np.random.default_rng(seed)
+    idx = rng.permutation(n_total).astype(np.int64)
+
+    n_test = int(n_total * test_size)
+    n_eval = int((n_total - n_test) * eval_size)
+
+    idx_test  = np.sort(idx[:n_test])
+    idx_eval  = np.sort(idx[n_test: n_test + n_eval])
+    idx_train = np.sort(idx[n_test + n_eval:])
+
+    print(f'[splits] train={len(idx_train)/1e6:.1f} M  '
+          f'eval={len(idx_eval)/1e6:.1f} M  '
+          f'test={len(idx_test)/1e6:.1f} M')
+    return idx_train, idx_eval, idx_test
+
+
+def compute_stats_from_sample(path_data: str,
+                               sobolev: bool,
+                               n_sample: int = 1_000_000,
+                               seed: int = SEED) -> dict:
+    """
+    Compute normalisation statistics from a random subsample of the HDF5 dataset.
+    Only n_sample rows are read — safe for arbitrarily large datasets.
+
+    Returns a dict with keys 'stats_X_train' and 'stats_y_train', compatible
+    with transform_data(), save_stats(), and test_utils throughout the pipeline.
+    """
+    n_total = get_dataset_size(path_data)
+    rng = np.random.default_rng(seed)
+    sample_idx = np.sort(
+        rng.choice(n_total, size=min(n_sample, n_total), replace=False).astype(np.int64)
+    )
+
+    with h5py.File(os.path.join(path_data, 'output_eps_g.h5'), 'r') as f:
+        X_s = f['eps_g'][sample_idx].astype(np.float32)
+    with h5py.File(os.path.join(path_data, 'output_sig_g.h5'), 'r') as f:
+        y_sig_s = f['sig_g'][sample_idx].astype(np.float32)
+
+    if sobolev:
+        with h5py.File(os.path.join(path_data, 'output_D.h5'), 'r') as f:
+            y_D_s = f['D'][sample_idx].reshape(len(sample_idx), -1).astype(np.float32)
+        y_s = np.concatenate([y_sig_s, y_D_s], axis=1)
+    else:
+        y_s = y_sig_s
+
+    stats = {
+        'stats_X_train': statistics(X_s),
+        'stats_y_train': statistics(y_s),
+    }
+    print(f'[stats] Computed from {len(sample_idx) / 1e6:.2f} M sampled points.')
+    return stats
+
+
+def compute_stats_full_dataset(path_data: str,
+                                sobolev: bool,
+                                chunk_size: int = 1_000_000,
+                                percentile_n_samples: int = 1_000_000,
+                                seed: int = SEED) -> dict:
+    """
+    Compute normalisation statistics by scanning the *entire* HDF5 dataset in chunks.
+
+    - mean and std  : exact, via Chan's parallel algorithm (numerically stable).
+    - max and min   : exact, running min/max per chunk.
+    - q_5 and q_95  : from a 1 M-point random reservoir (very accurate for 4e9 pts).
+    - log_mean/std  : from the same reservoir.
+
+    Only one chunk (~chunk_size rows) lives in RAM at a time.
+
+    Returns a dict with keys 'stats_X_train' and 'stats_y_train', compatible
+    with the rest of the pipeline (transform_data, save_stats, test_utils, …).
+    """
+    n_total = get_dataset_size(path_data)
+    n_chunks = math.ceil(n_total / chunk_size)
+    rng = np.random.default_rng(seed)
+
+    # Pre-select reservoir indices (sorted for sequential HDF5 reads later).
+    res_idx = np.sort(
+        rng.choice(n_total, size=min(percentile_n_samples, n_total),
+                   replace=False).astype(np.int64)
+    )
+
+    # ── first pass: exact mean / variance (Chan) + running max / min ──────────
+    count = 0
+    mean_X = mean_y = M2_X = M2_y = None
+    max_X  = max_y  = min_X = min_y = None
+
+    print(f'[stats] Scanning {n_total / 1e9:.2f} B samples in {n_chunks} chunks ...')
+    for ci in range(n_chunks):
+        chunk_start = ci * chunk_size
+        chunk_end   = min(chunk_start + chunk_size, n_total)
+        n_c = chunk_end - chunk_start
+
+        with h5py.File(os.path.join(path_data, 'output_eps_g.h5'), 'r') as f:
+            X_c = f['eps_g'][chunk_start:chunk_end].astype(np.float64)
+        with h5py.File(os.path.join(path_data, 'output_sig_g.h5'), 'r') as f:
+            y_sig_c = f['sig_g'][chunk_start:chunk_end].astype(np.float64)
+        if sobolev:
+            with h5py.File(os.path.join(path_data, 'output_D.h5'), 'r') as f:
+                y_D_c = f['D'][chunk_start:chunk_end].reshape(n_c, -1).astype(np.float64)
+            y_c = np.concatenate([y_sig_c, y_D_c], axis=1)
+        else:
+            y_c = y_sig_c
+
+        # Chunk statistics
+        mX_b = X_c.mean(axis=0);  M2X_b = ((X_c - mX_b) ** 2).sum(axis=0)
+        my_b = y_c.mean(axis=0);  M2y_b = ((y_c - my_b) ** 2).sum(axis=0)
+
+        if count == 0:
+            mean_X, M2_X = mX_b.copy(), M2X_b.copy()
+            mean_y, M2_y = my_b.copy(), M2y_b.copy()
+            max_X, min_X = X_c.max(axis=0), X_c.min(axis=0)
+            max_y, min_y = y_c.max(axis=0), y_c.min(axis=0)
+        else:
+            # Chan's parallel combination
+            new_count = count + n_c
+            dX = mX_b - mean_X
+            mean_X += dX * n_c / new_count
+            M2_X   += M2X_b + dX ** 2 * count * n_c / new_count
+
+            dy = my_b - mean_y
+            mean_y += dy * n_c / new_count
+            M2_y   += M2y_b + dy ** 2 * count * n_c / new_count
+
+            max_X = np.maximum(max_X, X_c.max(axis=0))
+            min_X = np.minimum(min_X, X_c.min(axis=0))
+            max_y = np.maximum(max_y, y_c.max(axis=0))
+            min_y = np.minimum(min_y, y_c.min(axis=0))
+
+        count += n_c
+        if (ci + 1) % 500 == 0 or ci == n_chunks - 1:
+            print(f'[stats]   {count / 1e9:.2f} B / {n_total / 1e9:.2f} B samples ...')
+
+    std_X = np.sqrt(M2_X / (count - 1))
+    std_y = np.sqrt(M2_y / (count - 1))
+
+    # ── second pass: reservoir sample for percentiles + log stats ─────────────
+    print('[stats] Loading reservoir sample for percentiles ...')
+    with h5py.File(os.path.join(path_data, 'output_eps_g.h5'), 'r') as f:
+        X_res = f['eps_g'][res_idx].astype(np.float32)
+    with h5py.File(os.path.join(path_data, 'output_sig_g.h5'), 'r') as f:
+        y_sig_res = f['sig_g'][res_idx].astype(np.float32)
+    if sobolev:
+        with h5py.File(os.path.join(path_data, 'output_D.h5'), 'r') as f:
+            y_D_res = f['D'][res_idx].reshape(len(res_idx), -1).astype(np.float32)
+        y_res = np.concatenate([y_sig_res, y_D_res], axis=1)
+    else:
+        y_res = y_sig_res
+
+    delta = 1e-8
+    log_X   = np.log(X_res   + np.abs(min_X.astype(np.float32))   + delta)
+    log_y   = np.log(y_res   + np.abs(min_y.astype(np.float32))   + delta)
+
+    def _build_stat(mean, std, max_, min_, reservoir):
+        return {
+            'mean':     mean.astype(np.float32),
+            'std':      std.astype(np.float32),
+            'max':      max_.astype(np.float32),
+            'min':      min_.astype(np.float32),
+            'q_5':      np.percentile(reservoir, 5,  axis=0).astype(np.float32),
+            'q_95':     np.percentile(reservoir, 95, axis=0).astype(np.float32),
+            'log_mean': np.mean(np.log(reservoir + np.abs(min_.astype(np.float32)) + delta), axis=0).astype(np.float32),
+            'log_std':  np.std( np.log(reservoir + np.abs(min_.astype(np.float32)) + delta), axis=0).astype(np.float32),
+        }
+
+    stats = {
+        'stats_X_train': _build_stat(mean_X, std_X, max_X, min_X, X_res),
+        'stats_y_train': _build_stat(mean_y, std_y, max_y, min_y, y_res),
+    }
+    print(f'[stats] Full-dataset statistics computed from {count / 1e9:.3f} B samples.')
+    return stats
+
+
+def load_test_sample(path_data: str,
+                     sobolev: bool,
+                     test_indices: np.ndarray,
+                     n_sample: int = 500_000,
+                     seed: int = SEED) -> dict:
+    """
+    Load a random subsample from the test split (raw, un-normalised).
+    Returns {'X_test': np.ndarray, 'y_test': np.ndarray}, compatible with
+    save_test_data() and test_NN_model().
+    """
+    rng = np.random.default_rng(seed)
+    chosen = np.sort(
+        rng.choice(test_indices, size=min(n_sample, len(test_indices)),
+                   replace=False).astype(np.int64)
+    )
+
+    with h5py.File(os.path.join(path_data, 'output_eps_g.h5'), 'r') as f:
+        X = f['eps_g'][chosen].astype(np.float32)
+    with h5py.File(os.path.join(path_data, 'output_sig_g.h5'), 'r') as f:
+        y_sig = f['sig_g'][chosen].astype(np.float32)
+
+    if sobolev:
+        with h5py.File(os.path.join(path_data, 'output_D.h5'), 'r') as f:
+            y_D = f['D'][chosen].reshape(len(chosen), -1).astype(np.float32)
+        y = np.concatenate([y_sig, y_D], axis=1)
+    else:
+        y = y_sig
+
+    print(f'[test-sample] Loaded {len(chosen) / 1e6:.2f} M test points.')
+    return {'X_test': X, 'y_test': y}
+
+
+def _std_normalise(data: np.ndarray, stat: dict) -> np.ndarray:
+    """Zero-mean / unit-variance normalisation using pre-computed statistics."""
+    std = np.where(stat['std'] == 0, 1.0, stat['std'])
+    return (data - stat['mean']) / std
+
+
+class HDF5StreamingDataset(torch.utils.data.IterableDataset):
+    """
+    Out-of-core dataset that streams (X, y) pairs from HDF5 files.
+
+    Only one chunk of rows lives in RAM at a time — the full dataset is never
+    loaded.  Normalisation is applied on-the-fly with pre-computed stats.
+    Multi-worker DataLoader is supported: each worker automatically handles a
+    disjoint slice of the index array.
+
+    Args:
+        path_data  (str):          Folder containing output_eps_g.h5,
+                                   output_sig_g.h5, and output_D.h5.
+        stats      (dict):         From compute_stats_from_sample(). Must have
+                                   keys 'stats_X_train' and 'stats_y_train'.
+        sobolev    (bool):         Include stiffness D in y if True.
+        indices    (np.ndarray):   Sorted int64 row indices for this split.
+        chunk_size (int):          Rows read per HDF5 access.  Default 500 000
+                                   ≈ 96 MB per chunk for float32 features.
+        shuffle    (bool):         Shuffle samples within each chunk.
+                                   True for training, False for eval / test.
+    """
+
+    def __init__(self, path_data: str, stats: dict, sobolev: bool,
+                 indices: np.ndarray, chunk_size: int = 500_000,
+                 shuffle: bool = True):
+        super().__init__()
+        self.path_data  = path_data
+        self.stats      = stats
+        self.sobolev    = sobolev
+        self.indices    = indices       # sorted int64 array
+        self.chunk_size = chunk_size
+        self.shuffle    = shuffle
+
+    def __len__(self) -> int:
+        return len(self.indices)
+
+    def __iter__(self):
+        # ── split work across DataLoader workers ──────────────────────────────
+        worker_info = torch.utils.data.get_worker_info()
+        if worker_info is None:
+            indices = self.indices
+        else:
+            per_worker = int(math.ceil(len(self.indices) / worker_info.num_workers))
+            start      = worker_info.id * per_worker
+            indices    = self.indices[start: start + per_worker]
+
+        # ── stream chunks ─────────────────────────────────────────────────────
+        for chunk_start in range(0, len(indices), self.chunk_size):
+            chunk_idx = indices[chunk_start: chunk_start + self.chunk_size]
+
+            with h5py.File(os.path.join(self.path_data, 'output_eps_g.h5'), 'r') as f:
+                X = f['eps_g'][chunk_idx].astype(np.float32)
+            with h5py.File(os.path.join(self.path_data, 'output_sig_g.h5'), 'r') as f:
+                y_sig = f['sig_g'][chunk_idx].astype(np.float32)
+            if self.sobolev:
+                with h5py.File(os.path.join(self.path_data, 'output_D.h5'), 'r') as f:
+                    y_D = f['D'][chunk_idx].reshape(len(chunk_idx), -1).astype(np.float32)
+                y = np.concatenate([y_sig, y_D], axis=1)
+            else:
+                y = y_sig
+
+            X = _std_normalise(X, self.stats['stats_X_train'])
+            y = _std_normalise(y, self.stats['stats_y_train'])
+
+            if self.shuffle:
+                perm = np.random.permutation(len(X))
+                X, y = X[perm], y[perm]
+
+            X_t = torch.from_numpy(X)
+            y_t = torch.from_numpy(y)
+            for i in range(len(X_t)):
+                yield X_t[i], y_t[i]
