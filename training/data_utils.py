@@ -682,17 +682,35 @@ class HDF5StreamingDataset(torch.utils.data.IterableDataset):
             start      = worker_info.id * per_worker
             indices    = self.indices[start: start + per_worker]
 
-        # ── stream chunks ─────────────────────────────────────────────────────
-        for chunk_start in range(0, len(indices), self.chunk_size):
-            chunk_idx = indices[chunk_start: chunk_start + self.chunk_size]
+        if len(indices) == 0:
+            return
+
+        # ── sequential scan with searchsorted ────────────────────────────────
+        # HDF5 fancy indexing with large scattered index arrays is very slow
+        # (essentially one seek per row). Instead we read contiguous slices and
+        # pick out the matching rows in memory — same approach as compute_stats.
+        # We only scan [indices[0], indices[-1]+1] to skip irrelevant regions.
+        scan_start = int(indices[0])
+        scan_end   = int(indices[-1]) + 1
+
+        for chunk_start in range(scan_start, scan_end, self.chunk_size):
+            chunk_end = min(chunk_start + self.chunk_size, scan_end)
+
+            lo = int(np.searchsorted(indices, chunk_start))
+            hi = int(np.searchsorted(indices, chunk_end))
+            if lo >= hi:
+                continue
+
+            local_idx = indices[lo:hi] - chunk_start
+            n_c = hi - lo
 
             with h5py.File(os.path.join(self.path_data, 'output_eps_g.h5'), 'r') as f:
-                X = f['eps_g'][chunk_idx].astype(np.float32)
+                X = f['eps_g'][chunk_start:chunk_end][local_idx].astype(np.float32)
             with h5py.File(os.path.join(self.path_data, 'output_sig_g.h5'), 'r') as f:
-                y_sig = f['sig_g'][chunk_idx].astype(np.float32)
+                y_sig = f['sig_g'][chunk_start:chunk_end][local_idx].astype(np.float32)
             if self.sobolev:
                 with h5py.File(os.path.join(self.path_data, 'output_D.h5'), 'r') as f:
-                    y_D = f['D'][chunk_idx].reshape(len(chunk_idx), -1).astype(np.float32)
+                    y_D = f['D'][chunk_start:chunk_end][local_idx].reshape(n_c, -1).astype(np.float32)
                 y = np.concatenate([y_sig, y_D], axis=1)
             else:
                 y = y_sig
@@ -701,10 +719,10 @@ class HDF5StreamingDataset(torch.utils.data.IterableDataset):
             y = _std_normalise(y, self.stats['stats_y_train'])
 
             if self.shuffle:
-                perm = np.random.permutation(len(X))
+                perm = np.random.permutation(n_c)
                 X, y = X[perm], y[perm]
 
             X_t = torch.from_numpy(X)
             y_t = torch.from_numpy(y)
-            for i in range(len(X_t)):
+            for i in range(n_c):
                 yield X_t[i], y_t[i]
