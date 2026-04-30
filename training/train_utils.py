@@ -254,10 +254,16 @@ def simple_train(inp:dict, model_dict:dict, data:dict, save_path:str, streaming:
             raise ValueError('batch_size cannot be None in streaming mode.')
         batch_size_train = inp['batch_size']
         batch_size_eval  = inp['batch_size']
+        # Windows uses 'spawn' for multiprocessing: worker processes re-import
+        # train.py from scratch, which re-runs the whole script and crashes.
+        # num_workers=0 (single-process) avoids this on Windows; Linux uses
+        # fork so multi-worker loading works fine there.
+        _nw_train = 0 if os.name == 'nt' else 4
+        _nw_eval  = 0 if os.name == 'nt' else 2
         train_loader = DataLoader(data['train'], batch_size=batch_size_train,
-                                  num_workers=4, pin_memory=True)
+                                  num_workers=_nw_train, pin_memory=True)
         eval_loader  = DataLoader(data['eval'],  batch_size=batch_size_eval,
-                                  num_workers=2, pin_memory=True)
+                                  num_workers=_nw_eval, pin_memory=True)
         # Cap eval batches per epoch so validation doesn't dominate wall time.
         # Default: evaluate on at most 500 batches (= 500 * batch_size samples).
         max_eval_batches = 500
