@@ -21,7 +21,7 @@ FILTER_DATA   = True
 # Ignored when SAMPLE_2D=True (2D path uses permute_and_save directly).
 CHUNKED       = True
 # Set LOG_WANDB=1 in the environment to log this run to wandb (project sampler_3DRC).
-LOG_WANDB     = os.environ.get('LOG_WANDB', '0').lower() in ('1', 'true', 'yes')
+LOG_WANDB     = os.environ.get('LOG_WANDB', '1').lower() in ('1', 'true', 'yes')
 SAMPLING_TYPE = 'combined_lhs_uniform'   # uniform | lhs | combined_lhs_uniform | log
 
 # Chunk size for the chunked sampling loop.

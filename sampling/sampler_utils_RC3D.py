@@ -659,7 +659,7 @@ def run_chunked_sampling(
         eps_g[:, 2] = eps_g[:, 2] * 2          # eps_xy → gamma_xy
 
         # 2 - Simulate stresses & stiffness
-        n_sub = max(1, chunk_n // 1_000_000)
+        n_sub = max(1, int(chunk_n) // 1_000_000)
         sig_g, dh = sig_simulation_batchwise(
             cp.asarray(eps_g), simulatesig, cm, mat_dict, n_batches=n_sub
         )
