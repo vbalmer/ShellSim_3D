@@ -260,10 +260,10 @@ def get_unnormalised_data(pred_norm: torch.Tensor, stats: dict, sobolev: bool) -
     """
 
     ydim = pred_norm.shape[1]
-    if sobolev:
-        norm_type_y = ['y-std']*ydim
-    else: 
-        norm_type_y = ['y-std']*6+['y_st-stitched']*36
+    # if sobolev:
+    #     norm_type_y = ['y-std']*ydim
+    # else: 
+    norm_type_y = ['y-std']*6+['y-st-stitched']*36
 
     pred = transform_data(pred_norm, stats, forward = False, type = norm_type_y)
 

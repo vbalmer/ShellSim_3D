@@ -119,7 +119,7 @@ def resolve_streaming() -> bool:
         val = os.environ['STREAMING'].lower() in ('1', 'true', 'yes')
         print(f'[train] STREAMING override     -> {val}')
         return val
-    return True   # default: streaming on
+    return False   # default: streaming off
 
 
 def run_streaming_pipeline(path_data: str, MODEL_DIR: str, LOGS_DIR: str,

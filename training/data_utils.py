@@ -156,12 +156,12 @@ def get_normalised_data(data: dict, stats: dict, sobolev: bool) -> dict:
 
     xdim = data['X_test'].shape[1]         # 6+GEOM_SIZE
     ydim = data['y_test'].shape[1]         # 6 or 6+36 depending on SOBOLEV
-    if sobolev:
+    if not sobolev:
         norm_type_x = ['x-std']*xdim
         norm_type_y = ['y-std']*ydim
     else: 
         norm_type_x = ['x-std']*xdim
-        norm_type_y = ['y-std']*6+['y_st-stitched']*36
+        norm_type_y = ['y-std']*6+['y-st-stitched']*36
 
     normalised_data = {}
     for key in data.keys():

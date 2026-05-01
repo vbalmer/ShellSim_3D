@@ -5,7 +5,7 @@
 from test_utils import *
 
 
-VERSION = 19                 
+VERSION = 25                 
 
 ############################ 5 - Test              ############################
 
