@@ -17,13 +17,12 @@ SWEEP       = False
 SOBOLEV     = True
 GEOM_SIZE   = 0           # [t, rho_x, rho_y, CC]
 PLOT_DATA   = False
-# Set True when dataset is too large to fit in RAM (> ~50 GB).
-# All data stays on disk; only one chunk lives in memory at a time.
-STREAMING   = True
-
 
 path_data, MODEL_DIR, LOGS_DIR = setup_dirs()
 inp = setup_hyperparams(SOBOLEV)
+# Set False to load the full dataset into RAM (only for small datasets).
+# Override with STREAMING=0 env var, e.g.: STREAMING=0 python train.py
+STREAMING = resolve_streaming()
 
 if STREAMING:
     run_streaming_pipeline(path_data, MODEL_DIR, LOGS_DIR,

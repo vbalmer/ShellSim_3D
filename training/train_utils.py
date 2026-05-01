@@ -113,6 +113,15 @@ def setup_hyperparams(sobolev: bool) -> dict:
     return inp
 
 
+def resolve_streaming() -> bool:
+    """Return the STREAMING flag, with STREAMING env-var taking precedence."""
+    if os.environ.get('STREAMING'):
+        val = os.environ['STREAMING'].lower() in ('1', 'true', 'yes')
+        print(f'[train] STREAMING override     -> {val}')
+        return val
+    return True   # default: streaming on
+
+
 def run_streaming_pipeline(path_data: str, MODEL_DIR: str, LOGS_DIR: str,
                             inp: dict, sobolev: bool,
                             save_folder: bool, sweep: bool) -> None:
