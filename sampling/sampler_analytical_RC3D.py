@@ -19,10 +19,11 @@ FILTER_DATA   = True
 # pieces — keeps RAM usage ~constant regardless of total sample count.
 # Set False only for small runs where all data fits comfortably in memory.
 # Ignored when SAMPLE_2D=True (2D path uses permute_and_save directly).
-CHUNKED       = True
+CHUNKED       = False
 # Set LOG_WANDB=1 in the environment to log this run to wandb (project sampler_3DRC).
 LOG_WANDB     = os.environ.get('LOG_WANDB', '1').lower() in ('1', 'true', 'yes')
-SAMPLING_TYPE = 'combined_lhs_uniform'   # uniform | lhs | combined_lhs_uniform | log
+SAMPLING_TYPE = 'combined_log_lhs'   # uniform | lhs | combined_lhs_uniform | log
+REMOVE_OUTLIERS = True
 
 # Chunk size for the chunked sampling loop.
 # Each chunk requires ~240 MB (eps_g) + ~1.44 GB (dh) on CPU RAM.
@@ -59,7 +60,7 @@ elif CHUNKED:
     eps_g_last, sig_g_last, D_last = run_chunked_sampling(
         constants, mat_dict, save_data_dir, simulatesig, cm,
         sampling_type=SAMPLING_TYPE, chunk_size=CHUNK_SIZE,
-        filter_data=FILTER_DATA, save_D=SAVE_D,
+        filter_data=FILTER_DATA, save_D=SAVE_D, remove_outliers = REMOVE_OUTLIERS
     )
 
 else:
@@ -68,15 +69,22 @@ else:
     eps_g = sample_eps(sampler=SAMPLING_TYPE, constants=constants)
     eps_g[:, 2] = eps_g[:, 2] * 2          # eps_xy → gamma_xy
 
+    if FILTER_DATA:
+        eps_g = filter_3d_data(eps_g, constants = constants, prefilter = True)
+
     n_sub = max(1, constants['n_samples_3D'] // 1_000_000)
     sig_g, dh = sig_simulation_batchwise(
         cp.asarray(eps_g), simulatesig, cm, mat_dict, n_batches=n_sub
     )
 
-    if FILTER_DATA:
-        eps_g_last, sig_g_last, D_last = filter_3d_data(eps_g, sig_g, dh, constants)
-    else:
-        eps_g_last, sig_g_last, D_last = eps_g, sig_g, dh
+    eps_g_last, sig_g_last, D_last = eps_g, sig_g, dh
+
+    if REMOVE_OUTLIERS:
+        _, _, mask_outliers = find_outlier_d(D_last, eps_g_last, 100)
+        eps_g_last = eps_g_last[~mask_outliers]
+        sig_g_last = sig_g_last[~mask_outliers]
+        D_last = D_last[~mask_outliers]
+        print(f'Removed {np.sum(mask_outliers)} outliers from dataset ({np.sum(mask_outliers)/(D_last.shape[0])*100:.3f} %)')
 
     save_3D_data(eps_g_last, save_data_dir, filename='eps_g')
     save_3D_data(sig_g_last, save_data_dir, filename='sig_g')
@@ -87,7 +95,7 @@ else:
 ############################ 5 - Plots (from last chunk) ############################
 
 if PLOT_D and eps_g_last is not None:
-    plot_filtered_stiffness(eps_g_last, D_last, 0, save_plot_path)
+    plot_filtered_stiffness(eps_g_last, D_last, 0, save_plot_path, remove_outliers = REMOVE_OUTLIERS)
     imshow_D_filtered(eps_g_last, D_last, 0, save_plot_path)
 
 

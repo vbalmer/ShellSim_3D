@@ -190,6 +190,23 @@ def sample_eps(sampler:str, constants: dict, sampler_type_log = 'lhs', zero_valu
         print(f'3D Sampling uniformly done in {t_elapsed_1/60:.2f}min')
 
         data = np.concatenate((data_0, data_1), axis = 0)
+
+    elif sampler == 'combined_log_lhs':
+        half_samples = int(constants['n_samples_3D']/2)
+
+        data_, max_log_neg, max_log_pos = sample_exponents(constants, sampler_type_log, zero_value_epsx, num_samples = half_samples)
+        data_0 = convert_log_data_to_eps(data_, max_log_neg, max_log_pos) 
+
+        t1 = time.perf_counter()
+        par_names = ['eps_x', 'eps_y', 'eps_xy', 'chi_x', 'chi_y', 'chi_xy']
+        lhs_sampler = samplers(par_names, constants['min'], constants['max'], samples= half_samples)
+        data_1 = lhs_sampler.lhs(criterion = 'c')
+        print(f'Sampled {int(half_samples/1e9)}*1e9 values for 3D-epsilon')
+        t_elapsed = time.perf_counter() - t1
+        print(f'3D Sampling with LHS done in {t_elapsed/60:.2f}min')
+
+        data = np.concatenate((data_0, data_1), axis = 0)
+
     
     else: 
         raise UserWarning('This has not yet been implemented.')
@@ -234,7 +251,7 @@ def sample_exponents(constants, sampler_type_log, zero_value_epsx, num_samples =
     """
 
     t = constants['t']
-    zero_vec = [zero_value_epsx]*2+[zero_value_epsx/10]+[zero_value_epsx/(t/2)]*2 + [(zero_value_epsx*10e-1)/(t/2)]
+    zero_vec = [zero_value_epsx]*2+[zero_value_epsx/10]+[zero_value_epsx/(t/2)]*2 + [(zero_value_epsx/10)/(t/2)]
 
     min = constants['min']
     max = constants['max']
@@ -276,7 +293,7 @@ def filter_small_epsilon(data, threshold = 1e-10):
 
     """
     mask = abs(data) < threshold
-    print(f'Detected {np.sum(mask)} points below threshold of {threshold}')
+    print(f'Detected {np.sum(mask)} points below threshold of {threshold}. These values are set to {threshold} in the dataset.')
     data[mask] = threshold
     
 
@@ -608,6 +625,7 @@ def run_chunked_sampling(
     chunk_size: int,
     filter_data: bool = True,
     save_D: bool = True,
+    remove_outliers: bool = True,
 ) -> tuple:
     """
     Full chunked sampling loop: sample → simulate → filter → append to HDF5.
@@ -658,17 +676,26 @@ def run_chunked_sampling(
         eps_g = sample_eps(sampler=sampling_type, constants=constants_chunk)
         eps_g[:, 2] = eps_g[:, 2] * 2          # eps_xy → gamma_xy
 
-        # 2 - Simulate stresses & stiffness
+        # 2 - Filter
+        if filter_data:
+            eps_g_f = filter_3d_data(eps_g, constants = constants, prefilter=True)
+
+        # 3 - Simulate stresses & stiffness
         n_sub = max(1, int(chunk_n) // 1_000_000)
         sig_g, dh = sig_simulation_batchwise(
             cp.asarray(eps_g), simulatesig, cm, mat_dict, n_batches=n_sub
         )
 
-        # 3 - Filter
-        if filter_data:
-            eps_g_f, sig_g_f, D_f = filter_3d_data(eps_g, sig_g, dh, constants)
-        else:
-            eps_g_f, sig_g_f, D_f = eps_g, sig_g, dh
+        eps_g_f, sig_g_f, D_f = eps_g, sig_g, dh
+
+        # 4 - Remove outliers of D:
+        if remove_outliers:
+            _, _, mask_outliers = find_outlier_d(D_f, eps_g_f, 1000)
+            eps_g_f = eps_g_f[~mask_outliers]
+            sig_g_f = sig_g_f[~mask_outliers]
+            D_f = D_f[~mask_outliers]
+            print(f'Removed {np.sum(mask_outliers)} outliers from dataset ({np.sum(mask_outliers)/eps_g_f.shape[0]*100:.3f} %)')
+
 
         # 4 - Append to HDF5
         save_3D_data_append(eps_g_f, save_data_dir, filename='eps_g')
@@ -766,7 +793,7 @@ def figure_formatting(ax, i, filename):
 
 ########################################## Visualising stiffnesses ##########################################
 
-def plot_filtered_stiffness(data_eps, data_D, idx_eps, save_path):
+def plot_filtered_stiffness(data_eps, data_D, idx_eps, save_path, remove_outliers: bool = False):
     """
     Plots filtered versions of stiffness data
 
@@ -790,9 +817,14 @@ def plot_filtered_stiffness(data_eps, data_D, idx_eps, save_path):
 
     # deduplicate data (if still two values left inside tolerance, always use the first one):
     data_d_eps, data_d_D = deduplicate_by_eps(data_s_eps, data_s_D, idx_eps)
+    if not remove_outliers:
+        # otherwise I will plot a random subset of the outliers.
+        data_d_D_outlier, data_d_eps_outlier, _ = find_outlier_d(data_d_D, data_d_eps, 1000)
+    else: 
+        data_d_D_outlier, data_d_eps_outlier = None, None
 
     # plot data
-    plot_data_stiffness(data_d_eps, data_d_D, idx_eps,save_path)
+    plot_data_stiffness(data_d_eps, data_d_D, data_d_D_outlier, data_d_eps_outlier, idx_eps,save_path)
 
     return
 
@@ -817,7 +849,7 @@ def get_mask_strain(data_eps, idx_eps, tol = [0.5e-3, 0.5e-3, 0.9e-3, 0.4e-5, 0.
 
     data_f_eps = data_eps[mask]
 
-    print(f'After filtering data, {mask.sum()} datapoints are left.')
+    print(f'After filtering data for plotting D, {mask.sum()} datapoints are left.')
     if mask.sum() < 1:
         raise UserWarning('No datapoints found in given range. Please change the filtering tolerance.')
 
@@ -838,13 +870,15 @@ def sort_data(data_f_eps, data_f_D, idx_eps):
 
     return data_s_eps, data_s_D
 
-def plot_data_stiffness(data_s_eps, data_s_D, idx_eps, save_path):
+def plot_data_stiffness(data_s_eps, data_s_D, data_d_D_outlier, data_d_eps_outlier, idx_eps, save_path):
 
     fig, axs = plt.subplots(6,6, figsize = [30,20])
 
     for i in range(6): 
         for j in range(6): 
             axs[i,j].plot(data_s_eps[:,idx_eps], data_s_D[:,i,j], marker = 'o')
+            if data_d_eps_outlier is not None:
+                axs[i,j].plot(data_d_eps_outlier[:,idx_eps], data_d_D_outlier[:,i,j], marker = 'o', color = 'coral')
 
     figure_formatting_D(axs, idx_eps)
 
@@ -912,7 +946,6 @@ def imshow_D_all(dh, save_path):
 
     return
 
-
 def imshow_sig_eps_all(sig_g, eps_g, save_path):
     data_ = [sig_g[:,:3], eps_g[:,:3], sig_g[:,3:6], eps_g[:,3:6]]
     filenames_ = ['n_i', 'eps_i', 'm_i', 'chi_i']
@@ -934,7 +967,7 @@ def imshow_sig_eps_all(sig_g, eps_g, save_path):
 ########################################## Filtering 3d generated data ##########################################
 
 
-def filter_3d_data(eps_g, sig_g, dh, constants):
+def filter_3d_data(eps_g, sig_g = None, dh = None, constants = None, prefilter = True):
     """
     filter out physically meaningless datapoints (datapoints where the top and bottom layer have too large or too small strains)
 
@@ -960,12 +993,14 @@ def filter_3d_data(eps_g, sig_g, dh, constants):
     mask = get_mask_strains(eps_top, eps_bot, eps_x_y_range, gamma_xy_range)
 
     # 3 - Remove values that do not live in desired ranges
-
     eps_g_f = eps_g[mask]
-    sig_g_f = sig_g[mask]
-    dh_f = dh[mask]
+    if not prefilter:
+        sig_g_f = sig_g[mask]
+        dh_f = dh[mask]
+        return eps_g_f, sig_g_f, dh_f
     
-    return eps_g_f, sig_g_f, dh_f
+    else:
+        return eps_g_f
 
 def get_mask_strains(eps_top, eps_bot, eps_range, gamma_range):  
     """
@@ -994,6 +1029,7 @@ def get_mask_strains(eps_top, eps_bot, eps_range, gamma_range):
 
 
 def filter_3D_data_batchwise(eps_g, sig_g, dh, constants, n_batches):
+    # function not in use.
 
     batch_size = int(eps_g.shape[0]/n_batches)
     eps_list, sig_list, dh_list = [], [], []
@@ -1023,7 +1059,6 @@ def filter_3D_data_batchwise(eps_g, sig_g, dh, constants, n_batches):
             print(f'Finished batch {i+1}/{n_batches} with batchsize = {batch_size} in {t_batch:.2f} sec.')
 
     return eps_g_f, sig_g_f, dh_f
-
 
 
 '''
@@ -1085,3 +1120,36 @@ def get_top_bottom_strains(eps_g, z_sup, z_inf):
 
     return eps_top, eps_bot
 '''
+
+
+
+########################################## Findig outliers in D ##########################################
+
+def find_outlier_d(dh: np.array, eps_g: np.array, factor: float = 1.5) -> np.array:
+    """
+    determines outliers in D-dataset
+    
+    Args: 
+        dh          (np.arr / float):   (n, 6, 6) stiffness data generated by sampler
+
+    Returns:
+        outliers    (np.arr / bool):     (n, 6, 6) outliers in dataset
+
+    """
+
+    q1 = np.quantile(dh, 0.25, axis = 0)
+    q3 = np.quantile(dh, 0.75, axis = 0)
+    iqr = q3-q1
+
+    outlier_min = q1-(factor*iqr)
+    outlier_max = q3+(factor*iqr)
+    
+    outlier_mask = (dh < outlier_min) | (dh > outlier_max)
+    
+    mask_1d = outlier_mask.any(axis=(1, 2))
+    outliers = dh[mask_1d]
+    eps_g_outlier = eps_g[mask_1d]
+
+    print(f'Found {np.sum(mask_1d)} outliers for D in dataset with N = {dh.shape[0]/1e3:.2f}*1e3 points ({np.sum(mask_1d)/(dh.shape[0])*100:.3f}%)')
+
+    return outliers, eps_g_outlier, mask_1d
