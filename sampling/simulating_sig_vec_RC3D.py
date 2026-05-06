@@ -262,7 +262,7 @@ def sig_simulation_batchwise(eps_g, simulatesig:SigSimulator, cm, mat_dict, n_ba
     batch_size = int(eps_g.shape[0]/n_batches)
     
     t00 = time.perf_counter()
-    for i in range(n_batches):
+    for i in range(int(n_batches)):
         if i%10 != 0:
             with HiddenPrints():
                 sig_g, dh,_ = single_batch_execution(i, batch_size, simulatesig, mat_dict, cm, dh, sig_g, eps_g)

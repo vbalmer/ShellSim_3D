@@ -25,13 +25,13 @@ def read_h5_file(save_data_path, filename, n_every:int) -> tuple:
 
     return data
 
-def get_data(path_data:str, sobolev:bool) -> tuple:
+def get_data(path_data:str) -> tuple:
     """
-    Fetches data given in path
+    Fetches data given in path. Note: Always reads all data (including stiffnesses, even when not training with sobolev, 
+    such that a later test comparison can be made)
     
     Args:
         path_data       (str):  Location where data is stored
-        sobolev         (bool): If True: include stiffness data in labels, otherwise leave out.
 
     Returns:
         features     (np.arr):  Epsilon values, shape: (ntot, 6)
@@ -42,10 +42,7 @@ def get_data(path_data:str, sobolev:bool) -> tuple:
     features = read_h5_file(path_data, 'eps_g', n_every = 1)
     labels = read_h5_file(path_data, 'sig_g', n_every = 1)
     labels_diff = read_h5_file(path_data, 'D', n_every = 1)
-    if sobolev: 
-        labels_concat = np.concatenate((labels, labels_diff.reshape((-1, labels.shape[1]**2))), axis = 1)
-    else: 
-        labels_concat = labels
+    labels_concat = np.concatenate((labels, labels_diff.reshape((-1, labels.shape[1]**2))), axis = 1)
 
     print(f'Total amount of datapoints: {features.shape[0]/1e6:.2f}*1e6.')
 

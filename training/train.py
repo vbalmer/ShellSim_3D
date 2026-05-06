@@ -32,7 +32,7 @@ else:
     ############################ 0 - Read data      ############################
     # Note: leave data in original units (N, mm)
 
-    features, labels_concat = get_data(path_data, SOBOLEV)
+    features, labels_concat = get_data(path_data)
     features = add_geom_data(path_data, features, GEOM_SIZE)
 
     ############################ 1 - Train-Eval-Test Split ############################
