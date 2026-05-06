@@ -15,19 +15,10 @@ SAMPLE_2D     = False
 PLOT_D        = True
 SAVE_D        = True
 FILTER_DATA   = True
-# Set CHUNKED=True (recommended) to iterate over the dataset in CHUNK_SIZE
-# pieces — keeps RAM usage ~constant regardless of total sample count.
-# Set False only for small runs where all data fits comfortably in memory.
-# Ignored when SAMPLE_2D=True (2D path uses permute_and_save directly).
 CHUNKED       = False
-# Set LOG_WANDB=1 in the environment to log this run to wandb (project sampler_3DRC).
 LOG_WANDB     = os.environ.get('LOG_WANDB', '1').lower() in ('1', 'true', 'yes')
-SAMPLING_TYPE = 'combined_log_uniform'   # uniform | lhs | combined_lhs_uniform | log
+SAMPLING_TYPE = 'combined_log_uniform'   
 REMOVE_OUTLIERS = True
-
-# Chunk size for the chunked sampling loop.
-# Each chunk requires ~240 MB (eps_g) + ~1.44 GB (dh) on CPU RAM.
-# Increase if you want fewer HDF5 append calls; decrease if GPU VRAM is tight.
 CHUNK_SIZE    = 10_000_000
 
 
@@ -48,8 +39,6 @@ os.makedirs(save_plot_path, exist_ok=True)
 ############################ 1-4 - Sampling ############################
 
 if SAMPLE_2D:
-    # 2D path: sample membrane strains, permute top/bottom pairs → generalised
-    # strains, and save eps_g only. Stress and stiffness are not computed here.
     eps_l = sample_eps(sampler='uniform', constants=constants)
     permute_and_save(eps_l, constants, save_data_dir, save_batchwise=True)
     eps_g_last = sig_g_last = D_last = None
@@ -64,8 +53,7 @@ elif CHUNKED:
     )
 
 else:
-    # 3D single-pass: all data is held in memory at once.
-    # Only suitable for small sample counts (smoke tests, etc.).
+    
     eps_g = sample_eps(sampler=SAMPLING_TYPE, constants=constants)
     eps_g[:, 2] = eps_g[:, 2] * 2          # eps_xy → gamma_xy
     eps_g[:, 5] = eps_g[:, 5] * 2          # chi_xy → 2*chi_xy
