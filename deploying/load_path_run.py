@@ -28,13 +28,13 @@ mat_tot_dict = {                        # no force definition here, as this chan
     'nu_2': np.array([0]),
     'mat': np.array([3]),
     'rho_x': np.array([0.025]),
-    'rho_y': np.array([0.0375])
+    'rho_y': np.array([0.025])
 }
 
 
 inp_run = {
     "mat_tot_dict": mat_tot_dict,
-    "model_no": ["480", "167"],
+    "model_no": [35],                                           # epoch number of NN model to use (int)
     "numit": 9,
     "predict": [True, True]                                     # [predict_sig, predict_D]
 }
@@ -45,6 +45,7 @@ CONTINUE = True                                                 # if CONTINUE = 
 
 
 # rho_y = 1%
+load_levels = [200, 400, 600]
 # load_levels = [200, 400, 600, 800, 1000, 1100, 1200, 1300, 1350, 1375, 1400, 1410, 1420]
 # load_levels = [-2000, -4000, -6000, -8000, -9000, -10000, -10100, -10200, -10250, -10300]
 # load_levels = [200, 400, 600, 800, 900, 910, 920, 930, 940, 950]
@@ -52,7 +53,7 @@ CONTINUE = True                                                 # if CONTINUE = 
 # rho_y = 1.5%
 # load_levels = [200, 600, 1000, 1200, 1400, 1600, 1650, 1700, 1710, 1720, 1730, 1740]
 # load_levels = [200, 600, 1000, 1200, 1400, 1600, 1800, 2000, 2025, 2050, 2060, 2070]
-load_levels = [-2000, -4000, -6000, -8000, -9000, -10000, -10100, -10200, -10250, -10300]
+# load_levels = [-2000, -4000, -6000, -8000, -9000, -10000, -10100, -10200, -10250, -10300]
 
 
 # rho_y = 0.75%
@@ -67,7 +68,7 @@ load_levels = [-2000, -4000, -6000, -8000, -9000, -10000, -10100, -10200, -10250
 
 current_time = datetime.now()
 new_folder = current_time.strftime("data_%Y%m%d_%H%M_case" + 'xx')
-new_folder_path = os.path.join('05_Deploying\\data_out', new_folder)
+new_folder_path = os.path.join('deploying\\data_out', new_folder)
 os.makedirs(new_folder_path, exist_ok=True)
 
 

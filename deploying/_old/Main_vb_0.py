@@ -326,7 +326,7 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
                         u -= du
                     else:
                         # in the case of ONEDIM_x, ONEDIM_y or TWODIM
-                        du, De_tot=fem_func0.solve_sys_nn_num(B,fi-fe, cDOF,np.zeros_like(cVAL), MATK["cm"],eh,sh, e, s, NN_hybrid['model_dim'], mat['s'])
+                        du, De_tot=fem_func0.solve_sys_nn_num(B,fi-fe, cDOF,np.zeros_like(cVAL), MATK["cm"],eh,sh, e, s, NN_hybrid['model_dim'])
                         u -= du
                     du_, De_tot_=fem_func1.solve_sys(B,fi-fe, cDOF,np.zeros_like(cVAL), MATK["cm"],e,s)
                     u_ -= du_

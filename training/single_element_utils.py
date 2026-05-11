@@ -11,7 +11,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from sampling.sampler_utils_RC3D import *
 from sampling.simulating_sig_vec_RC3D import *
-from test_utils import predict_D, predict_sig, get_inp_from_folder, test_model_instance
+try:
+    from .test_utils import predict_D, predict_sig, get_inp_from_folder, test_model_instance
+except ImportError:
+    from test_utils import predict_D, predict_sig, get_inp_from_folder, test_model_instance
 
 class HiddenPrints:
     def __enter__(self):
@@ -81,7 +84,7 @@ def single_element_test(idx_eps, geom, model_path,  min_ , max_, save_path = Non
     print('Calculated NN values')
 
 
-    # Step 2d: (Optional) Fetch training points to plot based on given geometry
+    # Step 2d: (Optional) Fetch training / test points to plot based on given geometry
     # TODO!
 
 

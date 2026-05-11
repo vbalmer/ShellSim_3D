@@ -10,8 +10,8 @@ import numpy as np
 import pandas as pd
 import wandb
 
-from deploy_utils import HiddenPrints, run_deployment, extend_material_parameters, get_paths
 from dict_CC import dict_CC
+from Main_vb import main_solver
 
 
 def run_deployment_loadpath(inp_run, force, new_folder_path = None):
@@ -23,13 +23,13 @@ def run_deployment_loadpath(inp_run, force, new_folder_path = None):
     """
 
     wandb.login()
+    single_deployment = single_deploy_utils(dict_CC)
 
     # 1 - get model version and epoch number
     v_model = inp_run['model_no'][0]
-    ep_no = inp_run['model_no'][1]
 
     # 2 - define location of trained model and input data to be used 
-    path_collection = get_paths(vnum=v_model, epnum=ep_no, vnumD=v_model, epnumD=ep_no)
+    path_collection = single_deployment.get_paths(vnum=v_model, vnumD=v_model)
 
     # 3 - update force to [N, kN], 
     mat_tot_dict_ = inp_run['mat_tot_dict']
@@ -37,7 +37,7 @@ def run_deployment_loadpath(inp_run, force, new_folder_path = None):
                           'F_N': np.array([0])})
 
     if mat_tot_dict_['mat'] == 3:
-        mat_tot_dict = extend_material_parameters(mat_tot_dict_)
+        mat_tot_dict = single_deployment.extend_material_parameters(mat_tot_dict_)
     else: 
         mat_tot_dict = mat_tot_dict_
 
@@ -57,7 +57,7 @@ def run_deployment_loadpath(inp_run, force, new_folder_path = None):
             'predict_D': inp_run['predict'][1],                 # If true, solves the system with NN_hybrid solver (prediction of D); if False: "normal" solver
             'predict_sig': inp_run['predict'][0],               # If true, solves the system with NN_hybrid solver (prediction of sig); if False: "normal" solver
             'PERM': None,                                       # if true: permutates the values of the real stiffness matrix to simulate NN predictions
-            'model_dim': 'TWODIM',                              # can be ONEDIM_y, ONEDIM_x, TWODIM or ALLDIM, only needs to be specified if NN is used.
+            'model_dim': 'THREEDIM',                              # can be ONEDIM_y, ONEDIM_x, TWODIM or ALLDIM, only needs to be specified if NN is used.
             'numit': inp_run['numit'],
             }
         ####
@@ -66,8 +66,13 @@ def run_deployment_loadpath(inp_run, force, new_folder_path = None):
         # => for nonlin: can choose what should be predicted.
         ####
 
-        mat_res = run_deployment(mat_tot, conv_plt, simple, n_simple, NN_hybrid, path_collection, new_folder_path)
-
+        mat_res = single_deployment.run_deployment(mat_tot, conv_plt, simple, n_simple, NN_hybrid, path_collection, new_folder_path)
+    else: 
+        # define NN_hybrid in the case of not calculating anything with NN.
+        NN_hybrid = {
+            'predict_D': inp_run['predict'][1],
+            'predict_sig': inp_run['predict'][0],
+        }
 
     ###########################################
     # Deployment without NN (= ground truth)
@@ -83,7 +88,7 @@ def run_deployment_loadpath(inp_run, force, new_folder_path = None):
                 'numit': inp_run['numit'],
                 }
 
-    mat_res = run_deployment(mat_tot, conv_plt, simple, n_simple, NN_hybrid_2, path_collection, new_folder_path)
+    mat_res = single_deployment.run_deployment(mat_tot, conv_plt, simple, n_simple, NN_hybrid_2, path_collection, new_folder_path)
 
     wandb.log(path_collection)
     wandb.log(NN_hybrid)
@@ -138,14 +143,14 @@ def save_deployment_loadpath(new_folder_path, force_i, NN_hybrid, conv_plt):
     os.makedirs(subfolder_path, exist_ok = True)
 
     for i, file_path in enumerate(relative_path):
-        file_path_n = os.path.join('05_Deploying', file_path)
+        file_path_n = os.path.join('deploying', file_path)
         destination_path = os.path.join(subfolder_path, os.path.basename(file_path_n))
         shutil.copy(file_path_n, destination_path)
         print(f'File {i + 1} copied to {destination_path}')
 
     ######## Copy folders ########
     for folder in folder_paths:
-        folder_path = os.path.join('05_Deploying', folder)
+        folder_path = os.path.join('deploying', folder)
         source_folder = os.path.abspath(folder_path)
         destination_folder = os.path.join(subfolder_path, os.path.basename(folder_path))
         shutil.copytree(source_folder, destination_folder, dirs_exist_ok=True)
@@ -157,14 +162,92 @@ def save_deployment_loadpath(new_folder_path, force_i, NN_hybrid, conv_plt):
     
 
 
-class deploy_utils():
-    def __init__(self):
-        #TODO!
-        pass
 
-    def run_deployment():
-        #TODO!
+class single_deploy_utils():
+    def __init__(self, dict_CC):
+        self.dict_CC = dict_CC
+
+    def run_deployment(self, mat_tot, conv_plt, simple, n_simple, NN_hybrid, path_collection, new_folder_path):
+        t0 = time.time()
+
+        # run the simulation
+        if simple:
+            mat_res = [dict() for x in range(n_simple)]  
+            for i in range(int(n_simple)):
+                # mat = mat_tot.loc[i,:]
+                mat = mat_tot
+                mat_res[i] = main_solver(mat,conv_plt, NN_hybrid, path_collection, new_folder_path)
+                if i>0 and i%10 == 0:
+                    print('**********************************************************************')
+                    print('Data points upto row', i, 'are simulated')
+                    print('time required for first', i,'points:',time.time()-t0, 'secs') 
+        else: 
+            RuntimeError('Always use simple = True for deployment')
+
+        if new_folder_path is None: 
+            self.save_data(NN_hybrid, mat_res)
+
+        return mat_res
+        
+    def extend_material_parameters(self, mat_tot_dict_):
+        # Add constant steel parameters
+        fsy = 435               # [MPa]
+        fsu = 470               # [MPa]
+        Es = 205e3              # [MPa]
+        Esh = 8e3               # [MPa]
+        D = 16                  # [mm]
+
+        mat_tot_dict_.update({'fsy': fsy, 'fsu': fsu, 'Es': Es, 'Esh': Esh, 'D': D})
+        mat_tot_dict = mat_tot_dict_
+
+        # Add additional concrete parameters
+        index = int(np.where(self.dict_CC['CC'] == mat_tot_dict['CC'])[0])
+        mat_tot_dict['E_1'] = self.dict_CC['Ec'][index]
+        mat_tot_dict['tb0'] = self.dict_CC['tb0'][index]
+        mat_tot_dict['tb1'] = self.dict_CC['tb1'][index]
+        mat_tot_dict['ect'] = self.dict_CC['ect'][index]
+        mat_tot_dict['ec0'] = self.dict_CC['ec0'][index]
+        mat_tot_dict['fcp'] = self.dict_CC['fcp'][index]
+        mat_tot_dict['fct'] = self.dict_CC['fct'][index]
+
+        return mat_tot_dict 
+
+    def get_paths(self, vnum, vnumD):
+        path_train = 'training\\logs'
+
+        model_path = {}
+
+        model_path['model'] = {
+                "sig_I": [path_train, vnum],
+                "sig_II": [path_train, vnum],
+                "sig_III": [path_train, vnum]
+                }
+
+        model_path["model"]["D"] = [path_train, vnumD]
+
+        return model_path
+    
+    def save_data(self, mat_res, NN_hybrid):
+        # save the data: 
+        if NN_hybrid['predict_sig'] and NN_hybrid['predict_D']: 
+            fname = 'mat_res_NN.pkl'
+        elif NN_hybrid['predict_sig']:
+            fname = 'mat_res_NN_sig.pkl'
+        elif NN_hybrid['predict_D']:
+            fname = 'mat_res_NN_D.pkl'
+        elif NN_hybrid['PERM'] is not None:
+            fname = 'mat_res_norm_perm.pkl'
+        elif 'PERM1' in NN_hybrid and NN_hybrid['PERM1'] is not None: 
+            fname = 'mat_res_norm_perm1.pkl'
+        else: 
+            fname = 'mat_res_norm.pkl'
+
+        mat_res_pd_NN = pd.DataFrame.from_dict(mat_res)
+        mat_res_pd_NN.to_pickle(os.path.join('05_Deploying\\data_out',fname))
+
         return
+
+    
 
 
 class HiddenPrints:
@@ -178,28 +261,7 @@ class HiddenPrints:
 
 
 
-def extend_material_parameters(mat_tot_dict_, mat_dict=dict_CC):
-    # Add constant steel parameters
-    fsy = 435               # [MPa]
-    fsu = 470               # [MPa]
-    Es = 205e3              # [MPa]
-    Esh = 8e3               # [MPa]
-    D = 16                  # [mm]
 
-    mat_tot_dict_.update({'fsy': fsy, 'fsu': fsu, 'Es': Es, 'Esh': Esh, 'D': D})
-    mat_tot_dict = mat_tot_dict_
-
-    # Add additional concrete parameters
-    index = int(np.where(mat_dict['CC'] == mat_tot_dict['CC'])[0])
-    mat_tot_dict['E_1'] = mat_dict['Ec'][index]
-    mat_tot_dict['tb0'] = mat_dict['tb0'][index]
-    mat_tot_dict['tb1'] = mat_dict['tb1'][index]
-    mat_tot_dict['ect'] = mat_dict['ect'][index]
-    mat_tot_dict['ec0'] = mat_dict['ec0'][index]
-    mat_tot_dict['fcp'] = mat_dict['fcp'][index]
-    mat_tot_dict['fct'] = mat_dict['fct'][index]
-
-    return mat_tot_dict
 
 
 

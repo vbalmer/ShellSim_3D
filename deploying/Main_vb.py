@@ -1,29 +1,13 @@
-# -------------------------------------------------------------------------------------------------------------------- #
-# Main File for FEM_Q Analysis
-# (C) Andreas Näsbom, ETH Zürich
-# 22.08.2021
-# -------------------------------------------------------------------------------------------------------------------- #
+# vb, 11.05.2026
 
-# -------------------------------------------------------------------------------------------------------------------- #
-# Python Versions information
-# - Compatible with numpy version 1.18.1 (pip install numpy==1.18.1), on later versions, commands must be adjusted
-# - Compatible with Tensorflow: numpy version 1.19.3
-# -------------------------------------------------------------------------------------------------------------------- #
-
-print("-------------------------------------------------------")
-print("Start Executing FEM_Q Script")
-print("-------------------------------------------------------")
-# -------------------------------------------------------------------------------------------------------------------- #
-# 0 Import
-# -------------------------------------------------------------------------------------------------------------------- #
-from Mesh_gmsh_vb import input_definition
-from fem_vb import fem_func
-# from fem_vb import f_assemble,f0_assemble, v_stat_con, c_dof,find_fi, find_ss,find_s0
-# from fem_vb import solve_sys,solve_0,find_e,find_e0,find_s,find_eh,find_sh,find_b
 import numpy as np
 import time
 
+from Mesh_gmsh_vb import input_definition
+from fem_vb import fem_func
 from main_utils_vb import *
+
+
 
 
 def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_folder_path = None):
@@ -40,22 +24,26 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
 
     OUTPUTS:
     mat_res     (dict)      Contains all relevant outputs from simulation that are required for data set
-    saved files to 06_LinElData\02_Simulator\Beispielrechnung\results
     
     '''
 
     start_main = time.time()
     # -------------------------------------------------------------------------------------------------------------------- #
-    # 1 running mesh_gmsh_vb script as "input_definition" function
+    # 1 Geometry definition (Running mesh_gmsh_vb script as "input_definition" function)
     # -------------------------------------------------------------------------------------------------------------------- #    
+
+    print("-------------------------------------------------------")
+    print("1 Geometry definition")
+    print("-------------------------------------------------------")
 
     MATK, NODESG, ELS, COORD, GEOMA, GEOMK, MASK, na, BC, gauss_order, it_type, Load_el, Load_n, copln = input_definition(mat, NN_hybrid)
     fem_func0 = fem_func(MATK, NODESG, ELS, COORD, GEOMA, GEOMK, MASK, na, BC, gauss_order, it_type, Load_el, Load_n, copln, model_path)
     fem_func1 = fem_func(MATK, NODESG, ELS, COORD, GEOMA, GEOMK, MASK, na, BC, gauss_order, it_type, Load_el, Load_n, copln, model_path)
+    
     # -------------------------------------------------------------------------------------------------------------------- #
     # 2 Initiation of Iteration
     # -------------------------------------------------------------------------------------------------------------------- #
-    
+
     print("-------------------------------------------------------")
     print("2 Initialisation")
     print("-------------------------------------------------------")
@@ -96,51 +84,7 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
     elif MATK['cm'][0] == 3:
         numit = NN_hybrid['numit']
 
-    sh_cum = np.zeros((numit+1, *sh.shape))
-    eh_cum = np.zeros((numit+1, *eh.shape))
-    u_cum = np.zeros((numit+1, *u.shape))
-    fi_cum = np.zeros((numit+1, *u.shape))
-    De_cum = np.zeros((numit+1, *De_tot.shape))
-    if NN_hybrid['predict_sig'] and not NN_hybrid['predict_D']: 
-        sh_cum_ = np.zeros((numit+1, *sh_.shape))
-        eh_cum_ = np.zeros((numit+1, *eh_.shape))
-        De_cum_ = None
-        u_cum_ = None
-    elif not NN_hybrid['predict_sig'] and not NN_hybrid['predict_D']:
-        eh_cum_ = None
-        sh_cum_ = None
-        u_cum_ = None
-        fi_cum_ = None
-        De_cum_ = None
-    elif not NN_hybrid['predict_sig'] and NN_hybrid['predict_D']:
-        u_cum_ = np.zeros((numit+1, *u.shape))
-        fi_cum_ = np.zeros((numit+1, *u.shape))
-        De_cum_ = np.zeros((numit+1, *De_tot_.shape))
-        eh_cum_ = np.zeros((numit+1, *eh.shape))
-        sh_cum_ = None
-    elif NN_hybrid['predict_sig'] and NN_hybrid['predict_D']:
-        sh_cum_ = np.zeros((numit+1, *sh_.shape))
-        eh_cum_ = np.zeros((numit+1, *eh_.shape))
-        u_cum_ = np.zeros((numit+1, *u.shape))
-        fi_cum_ = np.zeros((numit+1, *u.shape))
-        De_cum_ = np.zeros((numit+1, *De_tot_.shape))
-
-    sh_cum[0,:,:,:,:] = sh
-    eh_cum[0,:,:,:,:] = eh
-    u_cum[0,:,:,] = u
-    De_cum[0,:,:,:,:,:] = De_tot
-    if NN_hybrid['predict_sig'] and not NN_hybrid['predict_D']: 
-        sh_cum_[0,:,:,:,:] = sh_
-        eh_cum_[0,:,:,:,:] = eh_
-    if not NN_hybrid['predict_sig'] and NN_hybrid['predict_D']:
-        u_cum_[0,:,:,] = u_
-        De_cum_[0,:,:,:,:,:] = De_tot_
-        eh_cum_[0,:,:,:,:] = eh_
-    if NN_hybrid['predict_sig'] and NN_hybrid['predict_D']:
-        sh_cum_[0,:,:,:,:] = sh_
-        eh_cum_[0,:,:,:,:] = eh_
-        u_cum_[0,:,:,] = u_
-        De_cum_[0,:,:,:,:,:] = De_tot_
+    sh_cum, sh_cum_, eh_cum, eh_cum_, u_cum, u_cum_, De_cum, De_cum_, fi_cum, fi_cum_ = store_intermediate_solutions(numit, NN_hybrid, sh, sh_, eh, eh_, u, u_, De_tot, De_tot_)
 
     if conv_plt['else']:
         if NN_hybrid['predict_sig'] and not NN_hybrid['predict_D']: 
@@ -151,9 +95,8 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
             pass
             # this plot does not make any sense because the D matrix is not predicted by epsilon in this 0-th iteration
     
-
     # -------------------------------------------------------------------------------------------------------------------- #
-    # 3 Nonlinear Solution: Iteration with Secant/Tangent Stiffness
+    # 3 Nonlinear Solution: Iteration with Tangent Stiffness
     # -------------------------------------------------------------------------------------------------------------------- #
 
     print("-------------------------------------------------------")
@@ -172,124 +115,8 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
         mat_convergence_un_thn_nl = convergence_values_un_thn(u, unold, thnold)
 
     elif it_type == 2:
-        raise RuntimeWarning('Outdated, please use it_type = 1')
-        # 3.2  Secant Iteration
-        print("3.2 Secant Stiffness Iteration")
-        for i in range(numit):
-
-            # 3.2.1 Solution with Secant Stiffness for given Iteration Step
-            " 3.2.1 Output: - s,sx,sy,txy: Stresses"
-            "               - u: Deformations"
-            "               - eh: Generalized strains"
-            "               - [e, ex, ey, gxy, e1, e3, th]: Strains epsilon(u)-e0"
-
-            # u, Ke_tot = fem_func0.solve_sys(B, fe+f0, cDOF, cVAL, MATK["cm"], e, s)
-            if NN_hybrid['predict_D']:
-                u, De_tot = fem_func0.solve_sys_nn(B, fe+f0, cDOF, cVAL, MATK["cm"], eh, sh)
-            else: 
-                u, De_tot = fem_func0.solve_sys(B, fe+f0, cDOF, cVAL, MATK["cm"], e, s)
-
-            if NN_hybrid['predict_sig']:
-                eh = fem_func0.find_eh(B,u, gauss_order)
-                sh = fem_func0.find_sh_nn(eh, gauss_order)
-            else: 
-                eh = fem_func0.find_eh(B,u, gauss_order)
-                [e, ex, ey, gxy, e1, e3, th] = fem_func0.find_e(e0, eh, gauss_order)
-                s = fem_func0.find_s(e,gauss_order)
-                sh = fem_func0.find_sh(s, gauss_order)
-            
-
-            # 3.2.2 Convergence Control: Residual Vector
-            " 3.2.2 Output: - r: Residual = fi-fe"
-            "               - rcond: Residual without condensed DOFs"
-            fi = fem_func0.find_fi(B,sh)
-            r = np.add(fi, -(fe+f0))
-            rcond = fem_func0.v_stat_con(r, cDOF,np.zeros_like(cVAL))
-            print(" - Iteration step " + str(i) + " complete, maximum residual = " + str(np.round(np.max(abs(rcond)),1)))
-
-                    
-            if NN_hybrid['predict_sig'] and NN_hybrid['predict_D']:
-                # 3.2.3 Convergence Control: Relative Change in Strains
-                " 3.2.3 Output: - maxe: maximum absolute value of strain for which relative changes are tracked. "
-                "                       Defined in order not to track changes in (close to) zero values"
-                "               - diffe: e(i) - e(i-1), difference in strain between iteration steps, for strains > maxe"
-                "               - rele: relative difference: diffe./e(i) at locations where abs(e(i)) > maxe"
-                eh[eh<-99999] = 0
-                maxe = np.max(abs(eh))/1000
-                diffe = np.ndarray.flatten(eold[np.where(abs(eh)>maxe)])-np.ndarray.flatten(eh[np.where(abs(eh)>maxe)])
-                rele = np.divide(diffe,np.ndarray.flatten(eh[np.where(abs(eh)>maxe)]))
-
-            else: 
-                # 3.2.3 Convergence Control: Relative Change in Strains
-                " 3.2.3 Output: - maxe: maximum absolute value of strain for which relative changes are tracked. "
-                "                       Defined in order not to track changes in (close to) zero values"
-                "               - diffe: e(i) - e(i-1), difference in strain between iteration steps, for strains > maxe"
-                "               - rele: relative difference: diffe./e(i) at locations where abs(e(i)) > maxe"
-                e[e<-99999] = 0
-                maxe = np.max(abs(e))/1000
-                diffe = np.ndarray.flatten(eold[np.where(abs(e)>maxe)])-np.ndarray.flatten(e[np.where(abs(e)>maxe)])
-                rele = np.divide(diffe,np.ndarray.flatten(e[np.where(abs(e)>maxe)]))
-
-            # 3.2.4 Convergence Control: Relative Change in Displacement
-            " 3.2.4 Output: - [un ,thn]: node displacements and rotations separated"
-            "               - maxun: maximum absolute value of displacement for which relative changes are tracked. "
-            "                       Defined in order not to track changes in (close to) zero values"
-            "               - diffun: un(i) - un(i-1), difference in displacement between iteration steps, for displ. > maxun"
-            "               - relun: relative difference: diffun./un(i) at locations where abs(un(i)) > maxun"
-            [un, thn] = un_thn(u)
-            diffun = np.zeros_like(un)
-            relun = np.zeros_like(un)
-            maxun = np.max(abs(un))/1000
-            diffun[np.where(abs(un)>maxun)] = np.ndarray.flatten(unold[np.where(abs(un)>maxun)])-np.ndarray.flatten(un[np.where(abs(un)>maxun)])
-            relun[np.where(abs(un)>maxun)] = np.divide(diffun[np.where(abs(un)>maxun)],np.ndarray.flatten(un[np.where(abs(un)>maxun)]))
-            diffun[np.where(abs(un) < maxun)] = 0
-            relun[np.where(abs(un) < maxun)] = 0
-
-            # 3.2.5 Convergence Control: Relative Change in Rotation
-            " 3.2.5 Output: - maxthn: maximum absolute value of rotation for which relative changes are tracked. "
-            "                       Defined in order not to track changes in (close to) zero values"
-            "               - diffthn: thn(i) - thn(i-1), difference in displacement between iteration steps, for rot. > maxthn"
-            "               - relthn: relative difference: diffthn./thn(i) at locations where abs(thn(i)) > maxthn"
-            diffthn = np.zeros_like(un)
-            relthn = np.zeros_like(un)
-            maxthn = np.max(abs(thn))/1000
-            diffthn[np.where(abs(thn)>maxthn)] = np.ndarray.flatten(thnold[np.where(abs(thn)>maxthn)])-np.ndarray.flatten(thn[np.where(abs(thn)>maxthn)])
-            relthn[np.where(abs(thn)>maxthn)] = np.divide(diffthn[np.where(abs(thn)>maxthn)],np.ndarray.flatten(thn[np.where(abs(thn)>maxthn)]))
-            diffthn[np.where(abs(thn) < maxthn)] = 0
-            relthn[np.where(abs(thn) < maxthn)] = 0
-
-            # 3.2.6 Manipulate Residual for Plotting
-            " 3.2.6 Output:   - r: residual with 0 at condensed DOFs"
-            r[cDOF.astype(int)] = 0
-
-
-            # 3.2.7 Convergence Control: Plot Iteration Step and Display Sum of Residual Forces
-            if i ==0: 
-                convrf = sum(abs(r[0::6]))+sum(abs(r[1::6]))+sum(abs(r[2::6]))
-                convrm = sum(abs(r[3::6])) + sum(abs(r[4::6])) + sum(abs(r[5::6]))   
-            else: 
-                convrf = np.append(convrf, sum(abs(r[0::6]))+sum(abs(r[1::6]))+sum(abs(r[2::6])))
-                convrm = np.append(convrm, sum(abs(r[3::6])) + sum(abs(r[4::6])) + sum(abs(r[5::6])))
-            
-            if conv_plt['conv']:
-                if NN_hybrid['predict_sig'] and NN_hybrid['predict_D']:
-                    plot_convergence(i, eh, rele,un,relun,thn,relthn,r, numit, convrf, convrm, 'NN')
-                else:
-                    if not NN_hybrid['predict_sig'] and not NN_hybrid['predict_D']:
-                        plot_convergence(i, e, rele,un,relun,thn,relthn,r, numit, convrf, convrm, 'NLFEA')
-                    else: 
-                        plot_convergence(i, e, rele,un,relun,thn,relthn,r, numit, convrf, convrm, 'NN')
-
-        
-            if i < numit-1:
-                if NN_hybrid['predict_sig'] or NN_hybrid['predict_D']: 
-                    eold = eh
-                else:
-                    eold = e
-                unold = un
-                thnold = thn
-            print(" - Iteration step " + str(i) + " complete, sum of residual forces = " + str(np.round(abs(convrf[-1]), 1)))
-
+        raise RuntimeWarning('Secant stiffness iteration is outdated, please use it_type = 1')
+    
     elif it_type == 1:
         # 3.2  Tangent Iteration
         print("3.2 Tangent Stiffness Iteration")
@@ -325,8 +152,8 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
                         du, De_tot=fem_func0.solve_sys_nn(B,fi-fe, cDOF,np.zeros_like(cVAL), MATK["cm"],eh,sh)
                         u -= du
                     else:
-                        # in the case of ONEDIM_x, ONEDIM_y or TWODIM
-                        du, De_tot=fem_func0.solve_sys_nn_num(B,fi-fe, cDOF,np.zeros_like(cVAL), MATK["cm"],eh,sh, e, s, NN_hybrid['model_dim'], mat['s'])
+                        # in the case of ONEDIM_x, ONEDIM_y, TWODIM or THREEDIM
+                        du, De_tot=fem_func0.solve_sys_nn_num(B,fi-fe, cDOF,np.zeros_like(cVAL), MATK["cm"],eh,sh, e, s, NN_hybrid['model_dim'], scenario = mat["s"])
                         u -= du
                     du_, De_tot_=fem_func1.solve_sys(B,fi-fe, cDOF,np.zeros_like(cVAL), MATK["cm"],e,s)
                     u_ -= du_
@@ -368,7 +195,6 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
                 r = np.add(fi, -(fe+f0))
                 rcond = fem_func0.v_stat_con(r, cDOF,np.zeros_like(cVAL))
                 print(" - Iteration step " + str(i) + " complete, maximum residual = " + str(np.round(np.max(abs(rcond)),1)))
-        
 
                 #############################################
                 # Collecting values for plots
@@ -482,7 +308,7 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
                             check_plots_perit(model_path, i, sh_cum_[i,:,:,:,:].reshape((-1,8)), sh_cum[i,:,:,:,:].reshape((-1,8)), eh_cum[i,:,:,:,:].reshape((-1,8)),
                                             D_true = De_cum_[i+1,:,:,:,:,:].reshape((-1,8,8)), D_pred = De_cum[i+1,:,:,:,:,:].reshape((-1,8,8)), 
                                             sig = False)
-
+                            
                 # save new values as the old values for the next iteration: 
                 if i < numit-1:
                     if NN_hybrid['predict_sig'] and NN_hybrid['predict_D']: 
@@ -516,13 +342,11 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
                             save_deployment_loadpath(new_folder_path, int(mat["F"][j]/mat["L"]), NN_hybrid, conv_plt) 
                         if j < len(mat['F']):
                             print('Redoing lin.el. calculation to start next load step afresh.')
-                            e, eold, eh, eh_, s, s_prev, sh, sh_, r, u, u_, unold, thnold, De_tot, De_tot_ = linear_elastic_solution(fem_func0, fem_func1, B, fe, f0, e0, cDOF, cVAL, NN_hybrid, gauss_order)
-
-
-
+                            e, eold, eh, eh_, s, s_prev, sh, sh_, r, u, u_, unold, thnold, De_tot, De_tot_ = linear_elastic_solution(fem_func0, fem_func1, B, fe, f0, e0, cDOF, cVAL, NN_hybrid, gauss_order)         
 
     print('Finished :)')
     return mat_res
+
 
 
 def linear_elastic_solution(fem_func0, fem_func1, B, fe, f0, e0, cDOF, cVAL, NN_hybrid, gauss_order):
@@ -578,7 +402,6 @@ def linear_elastic_solution(fem_func0, fem_func1, B, fe, f0, e0, cDOF, cVAL, NN_
         r = u
 
     return e, eold, eh, eh_, s, s_prev, sh, sh_, r, u, u_, unold, thnold, De_tot, De_tot_
-
 
 def save_data_inter_loop(NN_hybrid, eold, fem_func0, B, u, gauss_order, e0c, sh0, s_prev, MATK, COORD, GEOMK, ELS, GEOMA, BC, MASK, NODESG,
                          e0, e, s, fi, fe, f0, cDOF, start_main, mat_convergence_un_thn_nl, na, mat,
@@ -777,13 +600,11 @@ def save_data_inter_loop(NN_hybrid, eold, fem_func0, B, u, gauss_order, e0c, sh0
     # mat_res_pd_NN = pd.DataFrame.from_dict(mat_res)
     # mat_res.to_pickle(os.path.join('05_Deploying\\data_out',fname))
 
-    with open(os.path.join('05_Deploying\\data_out', fname), 'wb') as f:
+    with open(os.path.join('deploying\\data_out', fname), 'wb') as f:
         pickle.dump(mat_res, f)
     
 
     return mat_res
-
-
 
 def save_deployment_loadpath(new_folder_path, force_i, NN_hybrid, conv_plt):
     #########################################
@@ -835,14 +656,14 @@ def save_deployment_loadpath(new_folder_path, force_i, NN_hybrid, conv_plt):
     os.makedirs(subfolder_path, exist_ok = True)
 
     for i, file_path in enumerate(relative_path):
-        file_path_n = os.path.join('05_Deploying', file_path)
+        file_path_n = os.path.join('deploying', file_path)
         destination_path = os.path.join(subfolder_path, os.path.basename(file_path_n))
         shutil.copy(file_path_n, destination_path)
         print(f'File {i + 1} copied to {destination_path}')
 
     # Copy folders
     for folder in folder_paths:
-        folder_path = os.path.join('05_Deploying', folder)
+        folder_path = os.path.join('deploying', folder)
         source_folder = os.path.abspath(folder_path)
         destination_folder = os.path.join(subfolder_path, os.path.basename(folder_path))
         shutil.copytree(source_folder, destination_folder, dirs_exist_ok=True)

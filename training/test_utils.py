@@ -15,9 +15,12 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.offsetbox import AnchoredText
 
-
-from architectures import FFNN
-from data_utils import get_normalised_data, data_to_torch, transform_data
+try:
+    from .architectures import FFNN
+    from .data_utils import get_normalised_data, data_to_torch, transform_data
+except ImportError:
+    from architectures import FFNN
+    from data_utils import get_normalised_data, data_to_torch, transform_data
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -321,6 +324,7 @@ def get_normalised_D_pred(inp:dict, data: dict, test_model: FFNN, batch_size_fal
         test_model  (FFNN): trained model in eval mode.
         test_batch_size(int): safeguard batch size in case standard batch size is too large.
         fallback    (bool): auxiliary variable for recursive function
+        batchwise   (bool): if false: doesn't carry out predictions batchwise.
 
     Returns: 
         pred_norm   (torch.Tensor): Normalised predictions for test dataset.
