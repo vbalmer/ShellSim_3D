@@ -967,30 +967,34 @@ def imshow_sig_eps_all(sig_g, eps_g, save_path):
 ########################################## Filtering 3d generated data ##########################################
 
 
-def filter_3d_data(eps_g, sig_g = None, dh = None, constants = None, prefilter = True):
+def filter_3d_data(eps_g, sig_g = None, dh = None, constants = None, prefilter = True, principal = True):
     """
     filter out physically meaningless datapoints (datapoints where the top and bottom layer have too large or too small strains)
 
-    Args: 
-        eps_g   (np.arr): original generalised strain matrix (n, 6)
-        sig_g   (np.arr): original generalised stress (n, 6)
-        dh      (np.arr): original stiffness matrix (n, 6, 6)
-        t       (int):    thickness of element (constant for now)
-    Returns: 
+    Args:
+        eps_g     (np.arr): original generalised strain matrix (n, 6)
+        sig_g     (np.arr): original generalised stress (n, 6)
+        dh        (np.arr): original stiffness matrix (n, 6, 6)
+        t         (int):    thickness of element (constant for now)
+        principal (bool):   if True, filter by principal strains; otherwise filter by eps_x/eps_y/gamma_xy ranges
+    Returns:
         eps_g_f (np.arr): filtered eps_g
         sig_g_f (np.arr): filtered sig_g
         dh_f    (np.arr): filtered stiffness
     """
-    
+
     # 1 - Calculate top and bottom strains from eps_g
     simulatesig = SigSimulator(constants)
     e = simulatesig.find_e_vec(cp.array(eps_g))
     eps_top, eps_bot = e[:,-1,:].get(), e[:,0,:].get()
 
     # 2 - Check whether strains lie in desired ranges
-    eps_x_y_range = [-3e-3, 50e-3]
-    gamma_xy_range = [-20e-3, 20e-3]
-    mask = get_mask_strains(eps_top, eps_bot, eps_x_y_range, gamma_xy_range)
+    if principal:
+        mask = get_mask_strains_principal(eps_top, eps_bot, eps_2_min = -3e-3, eps_x_y_max = 50e-3)
+    else:
+        eps_x_y_range = [-3e-3, 50e-3]
+        gamma_xy_range = [-20e-3, 20e-3]
+        mask = get_mask_strains(eps_top, eps_bot, eps_x_y_range, gamma_xy_range)
 
     # 3 - Remove values that do not live in desired ranges
     eps_g_f = eps_g[mask]
@@ -1026,6 +1030,48 @@ def get_mask_strains(eps_top, eps_bot, eps_range, gamma_range):
     print(f'Amount of points left after filtering: {np.sum(mask)}/{eps_top.shape[0]} = {np.sum(mask)/eps_top.shape[0]*100:.2f}\%')
 
     return mask
+
+def get_mask_strains_principal(eps_top, eps_bot, eps_2_min = -3e-3, eps_x_y_max = 50e-3):
+    """
+    get mask based on principal strain filtering (instead of just filtering like in "get_mask_strain")
+
+    Args:
+        eps_top     (np.arr): strains in top layer (n, 3) -> (eps_x, eps_y, gamma_xy)
+        eps_bot     (np.arr): strains in bottom layer (n, 3) -> (eps_x, eps_y, gamma_xy)
+        eps_2_min   (float):  minimum allowed minor principal strain (most compressive)
+        eps_x_y_max (float):  maximum allowed major principal strain (most tensile)
+
+    Returns:
+        mask        (np.arr): bool (n,)
+    """
+
+    eps_1_top, eps_2_top = get_principal_strains(eps_top[:, 0], eps_top[:, 1], eps_top[:, 2])
+    eps_1_bot, eps_2_bot = get_principal_strains(eps_bot[:, 0], eps_bot[:, 1], eps_bot[:, 2])
+
+    mask_eps_2 = (eps_2_top > eps_2_min) & (eps_2_bot > eps_2_min)
+    mask_eps_1 = (eps_1_top < eps_x_y_max) & (eps_1_bot < eps_x_y_max)
+
+    mask = mask_eps_2 & mask_eps_1
+
+    print(f'Amount of points left after principal filtering: {np.sum(mask)}/{eps_top.shape[0]} = {np.sum(mask)/eps_top.shape[0]*100:.2f}\%')
+
+    return mask
+
+
+def get_principal_strains(eps_x, eps_y, gamma_xy):
+    """
+    get principal strains (eps_1, eps_2) from a 2D strain state (eps_x, eps_y, gamma_xy).
+    eps_1 >= eps_2.
+    """
+    eps_avg = 0.5 * (eps_x + eps_y)
+    R = np.sqrt(((eps_x - eps_y) * 0.5) ** 2 + (gamma_xy * 0.5) ** 2)
+
+    eps_1 = eps_avg + R
+    eps_2 = eps_avg - R
+
+    return eps_1, eps_2
+
+
 
 
 def filter_3D_data_batchwise(eps_g, sig_g, dh, constants, n_batches):
