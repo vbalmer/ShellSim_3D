@@ -43,9 +43,11 @@ CONTINUE = True                                                 # if CONTINUE = 
                                                                 # does not start every load level from linear elastic
                                                                 # if only calculating one load level, please use Continue = False
 
+os.environ["WANDB_MODE"] = "offline"
+
 
 # rho_y = 1%
-load_levels = [200, 400, 600]
+load_levels = [600]
 # load_levels = [200, 400, 600, 800, 1000, 1100, 1200, 1300, 1350, 1375, 1400, 1410, 1420]
 # load_levels = [-2000, -4000, -6000, -8000, -9000, -10000, -10100, -10200, -10250, -10300]
 # load_levels = [200, 400, 600, 800, 900, 910, 920, 930, 940, 950]

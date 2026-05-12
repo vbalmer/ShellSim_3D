@@ -130,6 +130,7 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
                 print(f'Started iteration with load level {mat["F"]/mat["L"]}')
             fe = fem_func0.f_assemble(j, Load_el, Load_n)
             for i in range(numit):
+                start_time_iteration = time.perf_counter()
 
                 # 3.2.1 Solution with Secant Stiffness for given Iteration Step
                 " 3.2.1 Output: - s,sx,sy,txy: Stresses"
@@ -343,6 +344,9 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
                         if j < len(mat['F']):
                             print('Redoing lin.el. calculation to start next load step afresh.')
                             e, eold, eh, eh_, s, s_prev, sh, sh_, r, u, u_, unold, thnold, De_tot, De_tot_ = linear_elastic_solution(fem_func0, fem_func1, B, fe, f0, e0, cDOF, cVAL, NN_hybrid, gauss_order)         
+
+                t1 =(time.perf_counter()-start_time_iteration)
+                print(f'Time required for one iteration step: {t1/60:.2f} min.')
 
     print('Finished :)')
     return mat_res

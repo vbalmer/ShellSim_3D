@@ -4,7 +4,6 @@
 import os, sys
 import shutil
 import time
-import pickle
 
 import numpy as np
 import pandas as pd
@@ -168,24 +167,21 @@ class single_deploy_utils():
         self.dict_CC = dict_CC
 
     def run_deployment(self, mat_tot, conv_plt, simple, n_simple, NN_hybrid, path_collection, new_folder_path):
-        t0 = time.time()
+        t0 = time.perf_counter()
 
-        # run the simulation
+        # 1 - run the simulation
         if simple:
-            mat_res = [dict() for x in range(n_simple)]  
-            for i in range(int(n_simple)):
-                # mat = mat_tot.loc[i,:]
-                mat = mat_tot
-                mat_res[i] = main_solver(mat,conv_plt, NN_hybrid, path_collection, new_folder_path)
-                if i>0 and i%10 == 0:
-                    print('**********************************************************************')
-                    print('Data points upto row', i, 'are simulated')
-                    print('time required for first', i,'points:',time.time()-t0, 'secs') 
+            mat_res = main_solver(mat_tot,conv_plt, NN_hybrid, path_collection, new_folder_path)
         else: 
-            RuntimeError('Always use simple = True for deployment')
+            raise RuntimeError('Always use simple = True for deployment')
 
+        # 2 - save files
         if new_folder_path is None: 
             self.save_data(NN_hybrid, mat_res)
+        
+        # 3 - 
+        t1 =(time.perf_counter()-t0)
+        print(f'Analysed one load step in {t1/60:.2f} min.')
 
         return mat_res
         
