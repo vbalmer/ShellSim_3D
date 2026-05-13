@@ -10,7 +10,7 @@ import pandas as pd
 import wandb
 
 from dict_CC import dict_CC
-from Main_vb import main_solver
+from Main_vb_vec import main_solver
 
 
 def run_deployment_loadpath(inp_run, force, new_folder_path = None):

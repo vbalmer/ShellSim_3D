@@ -13,6 +13,7 @@ import pickle
 from dict_CC import dict_CC
 from Standard import e_principal,s_c3,s_sc,f_cs
 from Stresses_mixreinf import stress
+from constitutive_laws import ConstitutiveLaws
 from deployment_prediction import *
 
 
@@ -1310,6 +1311,152 @@ class fem_func():
         return Dmh,Dmbh,Dbh,Dsh
 
 
+    def dh_klij_vec(self, s, cmk):
+        """
+        Vectorised per-(k, l, i, j) layer tangent matrices. Vec-form analogue of the inner
+        per-layer block of dh_kij (the loop body that calls get_et_vb). Handles cm == 1 and
+        cm == 3 per element (mirroring the cm branching in find_dh_vec / get_et_vec).
+
+        Args:
+            s    (np.arr): layer stresses from find_s_vec, shape (nel, nlk, go, go, 3, 5).
+                           Axis -2 = strain perturbation index (0..2 for ex, ey, gxy),
+                           axis -1 = stress component (sx, sy, txy, txz, tyz).
+                           For elements with cm == 1, s.imag is ignored (the tangent is
+                           analytical), so s may be a stub array there.
+            cmk  (array-like): per-element cm identifier, shape (nel,). Only values in {1, 3}
+                           are supported. cm == 10 (alternating layer materials) needs a
+                           separate branch -- not implemented.
+
+        Returns:
+            Dp   (np.arr): in-plane tangent ET[a, b] = d s_in[a] / d e_in[b],
+                           shape (nel, nlk, go, go, 3, 3)
+            Ds   (np.arr): out-of-plane shear tangent (5/6 * G * I), per (k, l) -- no go axes,
+                           shape (nel, nlk, 2, 2)
+
+        Per-element constitutive split:
+            cm == 1: analytical plane-stress tangent, ET = E/(1-v^2) * [[1, v, 0], [v, 1, 0],
+                     [0, 0, (1-v)/2]] -- constant across layers and Gauss points.
+            cm == 3: complex-step tangent from s.imag.
+
+        Convention note: s_flat[..., p, c] from find_s_vec is the c-th stress component when
+        the p-th strain was perturbed; its imag part is d(s_c) / d(e_p). To match the standard
+        ET[a, b] = d(s_a) / d(e_b) convention used by k_k / get_et_vb, we swap the perturbation
+        and component axes before scaling by 1/eps.
+        """
+        nel = s.shape[0]
+        nlk = s.shape[1]
+
+        cm_arr = np.asarray(cmk)
+        valid_cm = np.isin(cm_arr, [1, 3])
+        if not valid_cm.all():
+            invalid = np.unique(cm_arr[~valid_cm])
+            raise NotImplementedError(
+                f"dh_klij_vec: only cm in {{1, 3}} supported; got cm values {invalid.tolist()}."
+            )
+
+        Ec = np.asarray(self.MATK["Ec"], dtype=float)                            # (nel,)
+        vc = np.asarray(self.MATK["vc"], dtype=float)                            # (nel,)
+
+        # cm == 3 path: complex-step tangent, ET[..., a, b] = s[..., b, a].imag / EPS
+        Dp_cm3 = s[..., :3, :3].imag.swapaxes(-2, -1) / 1e-16                    # (nel, nlk, go, go, 3, 3)
+
+        # cm == 1 path: analytical plane-stress tangent per element, constant across (l, i, j).
+        Dp_cm1 = np.zeros((nel, 3, 3))
+        Dp_cm1[:, 0, 0] = 1.0
+        Dp_cm1[:, 0, 1] = vc
+        Dp_cm1[:, 1, 0] = vc
+        Dp_cm1[:, 1, 1] = 1.0
+        Dp_cm1[:, 2, 2] = 0.5 * (1.0 - vc)
+        Dp_cm1 = (Ec / (1.0 - vc**2))[:, None, None] * Dp_cm1                    # (nel, 3, 3)
+
+        # Combine per element via mask (broadcasts the cm==1 matrix over l, i, j).
+        mask_cm1 = (cm_arr == 1)
+        Dp = np.where(mask_cm1[:, None, None, None, None, None],
+                      Dp_cm1[:, None, None, None, :, :],
+                      Dp_cm3)                                                    # (nel, nlk, go, go, 3, 3)
+
+        # Out-of-plane shear tangent: 5/6 * G * I, G = Ec / (2 * (1 + vc)), per element.
+        # Same formula for cm == 1 and cm == 3 (k_k's Ds doesn't depend on cm).
+        G  = Ec / (2.0 * (1.0 + vc))                                             # (nel,)
+        I2 = np.eye(2)
+        Ds = (5.0 / 6.0) * G[:, None, None, None] * np.broadcast_to(I2, (nel, nlk, 2, 2))
+        Ds = np.ascontiguousarray(Ds)                                            # (nel, nlk, 2, 2)
+
+        return Dp, Ds
+
+
+    def find_dh_vec(self, s, mat_dict, cm_klij = 3, go = 1) -> np.array:
+        raise Warning('Not in use')
+        """
+        Vectorised version of Andreas' function find dh for go = 1
+        Args:
+            s       (np.arr): layer stresses (n_tot, 20,3)
+            mat_dict  (dict): material parameters
+        Returns:
+            dh       (np.arr): stiffness matrix entries (n_tot, 6, 6)
+
+        """
+        t0 = time.perf_counter()
+        t = self.constants['t']
+        nl = self.constants['n_layer']
+        l = np.arange(nl)                               # shape (nl,)
+        z = -t / 2 + (2 * l + 1) * t / (2 * nl)         # shape (nl,)
+
+        # Dmh = np.zeros((s.shape[0],3,3))
+        # Dbh = np.zeros((s.shape[0],3,3))
+        # Dmbh = np.zeros((s.shape[0],3,3))
+
+        Dp = self.get_et_vec(s, mat_dict, cm_klij = cm_klij)       # shape (n_tot, 20, 3, 3)
+
+        z_ = z.reshape(1, -1, 1, 1)
+
+        Dmh     = np.sum((Dp)       , axis = 1)*t/nl               # shape (n_tot, 3, 3)
+        Dmbh    = np.sum((-z_*Dp)   , axis = 1)*t/nl                # shape (n_tot, 3, 3)
+        Dbh     = np.sum((z_**2*Dp) , axis = 1)*t/nl                # shape (n_tot, 3, 3)
+
+        De_1 = np.concatenate([Dmh, Dmbh], axis=2)          # (n_tot, 3, 6)
+        De_2 = np.concatenate([Dmbh, Dbh], axis=2)          # (n_tot, 3, 6)
+        De   = np.concatenate([De_1, De_2], axis=1)         # (n_tot, 6, 6)
+
+        t1 =(time.perf_counter()-t0)
+        print(f'Calculated stiffness matrix D in {t1/60:.2f} min.')
+        return De
+
+    def get_et_vec(self, s, mat_dict, cm_klij = 3) -> np.array:
+        raise Warning('Not in use')
+        """
+        Calculates per-layer stiffness matrix
+        Args:
+            s       (np.arr): layer stresses (n_tot, 20,3,3)
+            mat_dict  (dict): material parameters
+            cmklij     (int): if 1: linear elastic, if 3: concrete, nonlinear
+        Returns:
+            dp       (np.arr): stiffness matrix entries (n_tot, 20, 3, 3)
+        """
+
+        n_tot = s.shape[0]
+        nl = self.constants['n_layer']
+           
+        if cm_klij == 1:
+            E = mat_dict['Ec']
+            v = self.constants['nu']
+            ET = E / (1 - v * v) * np.array([[1, v, 0], [v, 1, 0], [0, 0, 0.5 * (1 - v)]])
+            dp = np.broadcast_to(ET[np.newaxis, np.newaxis,:,:], (n_tot, nl, 3,3))
+        
+        elif cm_klij == 3: 
+            ET = s.imag / 1e-16
+            dp = ET
+
+
+            # for debugging:
+            # fig1, ax1 = plt.subplots(figsize=(10, 8))
+            # im1 = ax1.imshow(ET.reshape((s.shape[0],180)), aspect='auto', cmap='viridis', interpolation='nearest')
+            # plt.colorbar(im1, ax=ax1)
+            # plt.show()
+            
+        return dp
+
+
     def k_k(self,Bm_k,Bb_k,Bs_k,Jdet_k,e_k,s_k, k, cm_k, go, perm = None, perm1=None, random_factor1 = None):
         ne_k = self.ELEMENTS[k, :]
         ne_k = ne_k[ne_k<10**5]
@@ -1403,6 +1550,142 @@ class fem_func():
             print(self.ELS[0][k+1])
             print(Jdet)
         return Ke, De_
+
+
+    def k_k_vec(self, B, e, s, cmk, go):
+        """
+        Vectorised per-element stiffness for all elements at once. Combines layer integration
+        (Dmh, Dmbh, Dbh, Dsh) and Gauss-point integration of B^T D B into batched einsums,
+        grouped by element type (4-node quads, 3-node tris).
+
+        Args:
+            B    (dict): B-matrix container (uses B["Bm"]["r"], B["Bb"]["r"], B["Bs"]["r"], B["Jdet"]).
+            e    (np.arr): strains from find_e_vec, shape (nel, nlk, go, go, 5). Currently unused
+                           in the cm == 3 path (the tangent comes from s.imag), accepted for
+                           signature parity with k_k.
+            s    (np.arr): stresses from find_s_vec, shape (nel, nlk, go, go, 3, 5).
+            cmk  (array-like): cm per element, shape (nel,).
+            go   (int):  Gauss order.
+
+        Returns:
+            Ke_dict (dict): {k: Ke[k]} per element. quads -> (24, 24), tris -> (18, 18).
+            De      (np.arr): 8x8 tangent per (k, i, j), shape (nel, go, go, 8, 8).
+
+        Drops perm / perm1 (random tangent permutations) and the drilling / coplanar correction
+        term from k_k -- add back if a specific mesh needs them. Supports cm in {1, 3} per
+        element via dh_klij_vec (mixed cm in the same mesh is fine). cm == 10 (alternating
+        layer materials) is not implemented.
+        """
+        nel = len(self.ELEMENTS[:, 0])
+        nlk = max(self.GEOMK["nlk"])
+
+        cm_arr   = np.asarray(cmk)
+        valid_cm = np.isin(cm_arr, [1, 3])
+        if not valid_cm.all():
+            invalid = np.unique(cm_arr[~valid_cm])
+            raise NotImplementedError(
+                f"k_k_vec: only cm in {{1, 3}} supported; got cm values {invalid.tolist()}."
+            )
+
+        # 1 Per-layer tangents -----------------------------------------------------------------
+        Dp_klij, Ds_kl = self.dh_klij_vec(s, cmk)                           # (nel, nlk, go, go, 3, 3), (nel, nlk, 2, 2)
+
+        # 2 Layer offsets and thicknesses (uniform layer layout, cm == 3) ---------------------
+        t_arr   = np.asarray(self.GEOMK["t"],   dtype=float)                # (nel,)
+        nlk_arr = np.asarray(self.GEOMK["nlk"], dtype=int)                  # (nel,)
+        l_idx   = np.arange(nlk)                                            # (nlk,)
+        z  = (-t_arr[:, None] / 2.0
+              + (2 * l_idx[None, :] + 1) * t_arr[:, None] / (2.0 * nlk_arr[:, None]))   # (nel, nlk)
+        dz = np.broadcast_to(t_arr[:, None] / nlk_arr[:, None], (nel, nlk)).copy()      # (nel, nlk)
+        layer_mask = l_idx[None, :] < nlk_arr[:, None]
+        dz = dz * layer_mask                                                # zero past nlk_k
+
+        # 3 Layer integration -> per (k, i, j) 3x3 / 2x2 blocks --------------------------------
+        z_exp  = z [:, :, None, None, None, None]
+        dz_exp = dz[:, :, None, None, None, None]
+        Dmh  = np.sum(           Dp_klij * dz_exp, axis=1)                  # (nel, go, go, 3, 3)
+        Dmbh = np.sum(-z_exp   * Dp_klij * dz_exp, axis=1)                  # (nel, go, go, 3, 3)
+        Dbh  = np.sum( z_exp**2 * Dp_klij * dz_exp, axis=1)                 # (nel, go, go, 3, 3)
+        Dsh_kl   = np.sum(Ds_kl * dz[:, :, None, None], axis=1)             # (nel, 2, 2)
+        Dsh_full = np.broadcast_to(Dsh_kl[:, None, None, :, :],
+                                   (nel, go, go, 2, 2))                     # (nel, go, go, 2, 2)
+
+        # 4 Assemble 8x8 De block per (k, i, j) ------------------------------------------------
+        # Block layout matches non-vec k_k: [[Dmh, Dmbh, 0], [Dmbh, Dbh, 0], [0, 0, Dsh]].
+        # Note: the off-diagonal block is Dmbh (not Dmbh^T) on BOTH sides -- the symmetrisation
+        # for the assembled K comes from `Kmbe + Kmbe^T` in step 5, not from De itself.
+        De = np.zeros((nel, go, go, 8, 8))
+        De[..., 0:3, 0:3] = Dmh
+        De[..., 0:3, 3:6] = Dmbh
+        De[..., 3:6, 0:3] = Dmbh
+        De[..., 3:6, 3:6] = Dbh
+        De[..., 6:8, 6:8] = Dsh_full
+
+        # 5 Per-element-type Ke via batched block-wise einsums --------------------------------
+        Ke_dict = {}
+        types = np.asarray(self.ELS[4])
+        for n_nodes, ndof in ((4, 24), (3, 18)):
+            els = np.where(types == n_nodes)[0]
+            E_count = len(els)
+            if E_count == 0:
+                continue
+
+            gp, w = self.gauss_points(n_nodes, go)
+            w_grid = np.outer(w, w).copy()                                  # (go, go)
+            if n_nodes == 3 and go >= 2:
+                w_grid[1, 1] = 0.0
+
+            B_batch    = np.zeros((E_count, go, go, 8, ndof))
+            Jdet_batch = np.zeros((E_count, go, go))
+            for idx, k in enumerate(els):
+                for i in range(go):
+                    for j in range(go):
+                        if n_nodes == 3 and i == 1 and j == 1:
+                            continue
+                        Bm   = B["Bm"]["r"][k][i][j]
+                        Bb   = B["Bb"]["r"][k][i][j]
+                        Bs   = B["Bs"]["r"][k][i][j]
+                        B_batch[idx, i, j]    = np.vstack([Bm, Bb, Bs])
+                        Jdet_batch[idx, i, j] = B["Jdet"][k][i][j]
+
+            weight = w_grid[None, :, :] * Jdet_batch                        # (E, go, go)
+
+            # Block-wise sub-B matrices
+            Bm_b = B_batch[..., 0:3, :]                                     # (E, go, go, 3, ndof)
+            Bb_b = B_batch[..., 3:6, :]                                     # (E, go, go, 3, ndof)
+            Bs_b = B_batch[..., 6:8, :]                                     # (E, go, go, 2, ndof)
+
+            Dmh_g  = Dmh[els]
+            Dmbh_g = Dmbh[els]
+            Dbh_g  = Dbh[els]
+            Dsh_g  = Dsh_full[els]
+
+            # K_block[e, a, b] = sum_{i, j, p, q} weight * B^T D B
+            Kme_batch  = np.einsum('eij,eijpa,eijpq,eijqb->eab', weight, Bm_b, Dmh_g,  Bm_b)
+            Kbe_batch  = np.einsum('eij,eijpa,eijpq,eijqb->eab', weight, Bb_b, Dbh_g,  Bb_b)
+            Kse_batch  = np.einsum('eij,eijpa,eijpq,eijqb->eab', weight, Bs_b, Dsh_g,  Bs_b)
+            Kmbe_batch = np.einsum('eij,eijpa,eijpq,eijqb->eab', weight, Bm_b, Dmbh_g, Bb_b)
+
+            # Ke = Kme + Kbe + Kse + Kmbe + Kmbe^T  (matches non-vec k_k)
+            Ke_batch = (Kme_batch + Kbe_batch + Kse_batch
+                        + Kmbe_batch + np.transpose(Kmbe_batch, (0, 2, 1)))   # (E, ndof, ndof)
+
+            # Drilling / coplanar correction: add iscoplk * A_k * t_k * 33600 * Tkr * 1e-8
+            # per element (Tkr / iscoplk don't easily vectorise).
+            A_k_arr = weight.sum(axis=(1, 2))                               # (E,)
+            for idx, k in enumerate(els):
+                n_k = self.ELEMENTS[k]
+                iscoplk = 1 if (n_k.any() in self.copln) else 0
+                Ke_i = Ke_batch[idx]
+                if iscoplk:
+                    Tkr = self.rotLG(k)[1]
+                    if n_nodes == 3:
+                        Tkr = Tkr[:18, :18]
+                    t_k = self.GEOMK["t"][k]
+                    Ke_i = Ke_i + iscoplk * A_k_arr[idx] * t_k * 33600 * Tkr * 1e-8
+                Ke_dict[int(k)] = Ke_i
+
+        return Ke_dict, De
 
 
     def k_k_nn(self,Bm_k,Bb_k,Bs_k,Jdet_k,eh_k,sh_k, k, cm_k):
@@ -1642,7 +1925,46 @@ class fem_func():
         end = time.time()
         time_K._updatetime(delta_t=end - start)
         return K, D_tot
-    
+
+
+    def k_glob_vec(self, B, e, s, cmk, go):
+        """
+        Vectorised drop-in for k_glob (no perm / perm1 -- diagnostic-only branches dropped,
+        see k_k_vec). All per-element stiffness matrices are computed in batch via k_k_vec;
+        the assembly into the global K is still a per-element loop over m_assemble because
+        each element's node set is different.
+
+        Args:
+            B    (dict):  B-matrix container (forwarded to k_k_vec).
+            e    (np.arr): strains from find_e_vec, shape (nel, nlk, go, go, 5).
+            s    (np.arr): stresses from find_s_vec, shape (nel, nlk, go, go, 3, 5).
+            cmk  (array-like): cm per element, shape (nel,). Restricted to all-cm=3 by k_k_vec.
+            go   (int): Gauss order.
+
+        Returns:
+            K     (np.arr): global stiffness, shape (6*nn, 6*nn).
+            D_tot (np.arr): per-(k, i, j) 8x8 tangent, shape (nel, go, go, 8, 8). Same content
+                            as k_glob's D_tot.
+        """
+        start = time.time()
+
+        NODESG = self.COORD["n"][0]
+        nn  = len(NODESG[:, 0])
+        nel = len(self.ELEMENTS[:, 0])
+
+        Ke_dict, D_tot = self.k_k_vec(B, e, s, cmk, go)
+
+        K = np.zeros((6 * nn, 6 * nn))
+        for k in range(nel):
+            nodes = self.ELEMENTS[k, :]
+            nodes = nodes[nodes < 10**5]
+            K = self.m_assemble(Ke_dict[int(k)], K, nodes)
+
+        end = time.time()
+        time_K._updatetime(delta_t=end - start)
+        return K, D_tot
+
+
     def k_glob_nn(self, B,eh,sh, cmk):
         """ ----------------------------------- Create global stiffness matrix ------------------------------------------
             --------------------------------------------    INPUT: ------------------------------------------------------
@@ -2288,6 +2610,77 @@ class fem_func():
         return eh
 
 
+    def find_eh_vec(self, B, u, go):
+        """
+        Vectorised version of find_eh.
+
+        Args:
+            B   (dict): B-matrix container (uses B["Bm"]["nr"], B["Bb"]["nr"], B["Bs"]["nr"])
+            u   (np.arr): global displacement vector
+            go  (int): Gauss order
+
+        Returns:
+            eh  (np.arr): generalised strains at Gauss points, shape (nel, go, go, 8)
+
+        Strategy: group elements by type (4-node quads / 3-node tris), assemble per-element local
+        displacement u_k, rotation Tk, and stacked B matrix B_kij = vstack(Bm, Bb, Bs) for each
+        Gauss point. Then `eh_kij = B_kij @ Tk @ u_k` is evaluated as two einsum contractions.
+        Triangle elements get the -1e5 sentinel at the (i=1, j=1) Gauss slot, matching find_eh.
+        """
+        start = time.time()
+
+        nel = len(self.ELEMENTS[:, 0])
+        eh = np.zeros((nel, go, go, 8))
+        types = np.asarray(self.ELS[4])
+
+        for n_nodes, ndof in ((4, 24), (3, 18)):
+            els = np.where(types == n_nodes)[0]
+            E = len(els)
+            if E == 0:
+                continue
+
+            # Per-element local displacement: (E, ndof). find_v_el can return either (ndof,)
+            # or (ndof, 1) depending on whether u is 1-D or a column vector; ravel handles both.
+            u_e = np.empty((E, ndof))
+            for idx, k in enumerate(els):
+                u_e[idx] = np.asarray(self.find_v_el(u, k)).ravel()
+
+            # Per-element rotation Tk: (E, ndof, ndof). For tris use the 18x18 block.
+            Tk = np.empty((E, ndof, ndof))
+            for idx, k in enumerate(els):
+                Tk_full = self.rotLG(k)[0]
+                Tk[idx] = Tk_full[:ndof, :ndof] if n_nodes == 3 else Tk_full
+
+            # Rotated local displacement: (E, ndof)
+            u_rot = np.einsum('eij,ej->ei', Tk, u_e)
+
+            # Stacked B matrix per Gauss point: (E, go, go, 8, ndof). The (i=1, j=1) slot stays
+            # zero for triangles; we overwrite it with the sentinel below.
+            B_batch = np.zeros((E, go, go, 8, ndof))
+            for idx, k in enumerate(els):
+                for i in range(go):
+                    for j in range(go):
+                        if n_nodes == 3 and i == 1 and j == 1:
+                            continue
+                        Bm = B["Bm"]["nr"][k][i][j]
+                        Bb = B["Bb"]["nr"][k][i][j]
+                        Bs = B["Bs"]["nr"][k][i][j]
+                        B_batch[idx, i, j] = np.concatenate([Bm, Bb, Bs], axis=0)
+
+            # eh_kij = B_kij @ u_rot : (E, go, go, 8)
+            eh_e = np.einsum('eijkl,el->eijk', B_batch, u_rot)
+            eh[els] = eh_e
+
+        # Triangle sentinel at (i=1, j=1); only reachable when go >= 2.
+        if go >= 2:
+            tri_mask = (types == 3)
+            eh[tri_mask, 1, 1, :] = -10**5
+
+        end = time.time()
+        time_eh._updatetime(delta_t=end - start)
+        return eh
+
+
     def find_sh(self, s,go):
         # 0 Initiate Time Measurement
         start = time.time()
@@ -2342,6 +2735,95 @@ class fem_func():
         time_sh._updatetime(delta_t=end - start)
         return sh
 
+    def find_sh_vec(self, s, go):
+        """
+        Vectorised drop-in for find_sh. Same signature as find_sh. Supports varying meshes
+        (per-element thickness, layer count, cm) and any Gauss order.
+
+        Args:
+            s   (np.arr): layer stresses from find_s_vec, shape (nel, nlk, go, go, 3, 5).
+                          Only s[..., 0, :].real is used (perturbation index 0, real part
+                          = unperturbed stress; the complex-step perturbations are only
+                          needed downstream for D, not for assembling sh).
+            go  (int):    Gauss order
+
+        Returns:
+            sh  (np.arr): generalised stresses, shape (nel, go, go, 8), float
+
+        Per (k, i, j), integrates the 5-component layer stress across thickness:
+            sh[k, i, j] = sum_l S[k, l]^T @ s_real[k, l, i, j, :] * dz[k, l]
+        where S[k, l] is the same lamina matrix used in find_e_klij_vec (5 x 8). Per-element
+        thickness, layer count, and the cm_k == 10 alternating-thickness layout are honoured;
+        layers beyond each element's nlk_k are masked out. Triangle (i=1, j=1) sentinel
+        applied via boolean masking for go >= 2.
+        """
+        # t0 = time.perf_counter()
+
+        nel     = len(self.ELEMENTS[:, 0])
+        nlk_max = max(self.GEOMK["nlk"])
+
+        # --- z[k, l] and dz[k, l] ------------------------------------------------------------
+        t_arr   = np.asarray(self.GEOMK["t"],   dtype=float)             # (nel,)
+        nlk_arr = np.asarray(self.GEOMK["nlk"], dtype=int)               # (nel,)
+        l_idx   = np.arange(nlk_max)                                      # (nlk_max,)
+
+        # Standard uniform-thickness layout (find_sh's default branch).
+        z_uniform  = (-t_arr[:, None] / 2.0
+                      + (2 * l_idx[None, :] + 1) * t_arr[:, None] / (2.0 * nlk_arr[:, None]))   # (nel, nlk_max)
+        dz_uniform = np.broadcast_to(t_arr[:, None] / nlk_arr[:, None],
+                                     (nel, nlk_max)).copy()                                    # (nel, nlk_max)
+
+        # cm_k == 10 alternating-thickness layout (find_sh's special branch).
+        cm_arr    = np.asarray(self.MATK["cm"])
+        mask_cm10 = (cm_arr == 10)
+        if mask_cm10.any():
+            t1          = np.asarray(self.GEOMK["t"],  dtype=float)       # (nel,)
+            t2          = np.asarray(self.GEOMK["t2"], dtype=float)       # (nel,)
+            t_per_layer = np.where(l_idx[None, :] % 2 == 0,
+                                   t1[:, None], t2[:, None])              # (nel, nlk_max)
+            half        = nlk_arr // 2
+            t_k_tot     = (half + 1) * t1 + half * t2                     # (nel,)
+            t_cum       = np.cumsum(t_per_layer, axis=1)                  # (nel, nlk_max)
+            z_cm10      = -t_k_tot[:, None] / 2.0 + (t_cum - 0.5 * t_per_layer)
+            z           = np.where(mask_cm10[:, None], z_cm10, z_uniform)
+            dz          = np.where(mask_cm10[:, None], t_per_layer, dz_uniform)
+        else:
+            z  = z_uniform
+            dz = dz_uniform
+
+        # Mask out layers beyond each element's nlk_k -- find_sh integrates only over the
+        # element's actual layers, not up to nlk_max.
+        layer_mask = l_idx[None, :] < nlk_arr[:, None]                   # (nel, nlk_max), bool
+        dz = dz * layer_mask
+
+        # --- S[k, l] of shape (5, 8) (same lamina matrix as find_e_klij_vec) ----------------
+        S_const = np.zeros((5, 8))
+        S_const[0, 0] = 1.0
+        S_const[1, 1] = 1.0
+        S_const[2, 2] = 1.0
+        S_const[3, 6] = 1.0
+        S_const[4, 7] = 1.0
+        S_z = np.zeros((5, 8))
+        S_z[0, 3] = -1.0
+        S_z[1, 4] = -1.0
+        S_z[2, 5] = -1.0
+        S = S_const + z[..., None, None] * S_z                            # (nel, nlk_max, 5, 8)
+
+        # --- Unperturbed real-part layer stresses ------------------------------------------
+        s_real = s[..., 0, :].real                                        # (nel, nlk_max, go, go, 5)
+
+        # --- Integrate over layers ----------------------------------------------------------
+        # sh[k, i, j, b] = sum_l sum_a S[k, l, a, b] * s_real[k, l, i, j, a] * dz[k, l]
+        sh = np.einsum('klab,klija,kl->kijb', S, s_real, dz)              # (nel, go, go, 8)
+
+        # --- Triangle sentinel at (i=1, j=1) for go >= 2 -----------------------------------
+        if go >= 2:
+            tri_mask = (np.asarray(self.ELS[4]) == 3)
+            sh[tri_mask, 1, 1, :] = -10**5
+
+        # t1 = (time.perf_counter() - t0)
+        # print(f'Calculated generalised stresses sh in {t1/60:.2f} min.')
+        return sh
 
     def find_sh_nn(self, eh,go, model_dim):
         # 0 Initiate Time Measurement
@@ -2398,6 +2880,89 @@ class fem_func():
         time_sh._updatetime(delta_t=end - start)
         return sh
 
+    def find_sh_nn_vec(self, eh, go, model_dim):
+        """
+        Vectorised drop-in for find_sh_nn. Same signature. One batched NN call replaces the
+        triple-nested (k, i, j) loop.
+
+        Args:
+            eh         (np.arr): generalised strains from find_eh / find_eh_vec, shape (nel, go, go, 8)
+            go         (int):    Gauss order
+            model_dim:           accepted for signature parity with find_sh_nn (only used in
+                                 commented-out predict_sig_D path of the original)
+
+        Returns:
+            sh         (np.arr): generalised stresses, shape (nel, go, go, 8). The NN predicts
+                                 the first 6 components (membrane + bending); the last 2
+                                 (qx, qy) stay zero, matching find_sh_nn. Triangle (i=1, j=1)
+                                 slots set to -1e5 for go >= 2.
+
+        Restrictions (mirror find_sh_nn's active paths):
+            * All elements must have cm == 3 (RC concrete). cm == 1 and cm == 10 raise Warning
+              in find_sh_nn ("outdated, please check at next use") and are not exercised here.
+
+        Model selection: the original picks an NN model (I, II, or III) per sample via
+        check_range_NN; this function picks ONE model for the whole batch by passing the full
+        flat input to check_range_NN. check_range_NN's `.all()` test naturally promotes to the
+        smallest model containing ALL samples, so the chosen model is at least as permissive
+        as any per-sample choice -- correct, but potentially coarser than the original for
+        small-strain samples in a mixed-strain batch.
+        """
+        start = time.time()
+
+        nel = len(self.ELEMENTS[:, 0])
+        sh  = np.zeros((nel, go, go, 8))
+
+        cm_arr = np.asarray(self.MATK["cm"])
+        if (cm_arr != 3).any():
+            raise Warning(
+                'find_sh_nn_vec: only cm == 3 (RC concrete) is supported. '
+                'cm == 1 and cm == 10 paths raise Warning in find_sh_nn (outdated).'
+            )
+
+        # Sample-to-element mapping (n = k*go*go + i*go + j)
+        n_tot = nel * go * go
+        k_idx = np.repeat(np.arange(nel), go * go)
+        ij    = np.tile(np.arange(go * go), nel)
+        i_idx = ij // go
+        j_idx = ij %  go
+
+        # Triangle (i=1, j=1) sentinel positions
+        types    = np.asarray(self.ELS[4])
+        sentinel = (types[k_idx] == 3) & (i_idx == 1) & (j_idx == 1)        # (n_tot,)
+        valid    = ~sentinel
+
+        # Flatten eh: (nel, go, go, 8) -> (n_tot, 8)
+        eh_flat = eh.reshape(n_tot, 8)
+
+        # Build the (eh, t) range-check input for valid samples only. helper_t uses
+        # GEOMK['t'][0] for every sample, matching find_sh_nn's helper_t = t[0]*ones.
+        helper_t    = self.GEOMK['t'][0] * np.ones((n_tot, 1))
+        range_input = np.concatenate((eh_flat[valid], helper_t[valid]), axis=1)  # (n_valid, 9)
+        cmk         = int(cm_arr.reshape(-1)[0])
+        chosen_model_path = self.check_range_NN(range_input, 'eps-t', cmk=cmk)
+
+        # Single batched NN call on valid samples (cm == 3 path: first 6 components only).
+        input_nn = eh_flat[valid, :6]                                       # (n_valid, 6)
+        mat_NN   = make_NN_prediction(input_nn, predict='sig', model_path=chosen_model_path)
+        sig_pred = mat_NN['sig']                                            # (n_valid, 6)
+
+        # Output-side range check (same call shape as the original's per-sample post-check).
+        self.check_range_NN(sig_pred, 'sig', cmk=cmk)
+
+        # Scatter predictions back into the full (n_tot, 6) layout, then reshape to structured.
+        sig_full = np.zeros((n_tot, 6))
+        sig_full[valid] = sig_pred
+        sh[..., :6] = sig_full.reshape(nel, go, go, 6)
+
+        # Triangle (i=1, j=1) sentinel for go >= 2 (overwrites all 8 components).
+        if go >= 2:
+            tri_mask = (types == 3)
+            sh[tri_mask, 1, 1, :] = -10**5
+
+        end = time.time()
+        time_sh._updatetime(delta_t=end - start)
+        return sh
 
     def find_e_klij(self, eh_kij, k, l, i, j):
         """ ------------------------------------------- Shell Elements --------------------------------------------------
@@ -2499,6 +3064,130 @@ class fem_func():
         return e, ex, ey, gxy, e1, e3, th
 
 
+    def find_e_klij_vec(self, eh):
+        """
+        Vectorised version of find_e_klij. Returns the layer strain S @ eh for every
+        (element, layer, gauss-point) tuple in one shot, with no e0 subtraction (mirrors
+        find_e_klij, which also doesn't subtract e0).
+
+        Args:
+            eh  (np.arr): generalised strains, shape (nel, go, go, 8)
+
+        Returns:
+            e_klij  (np.arr): layer strain components, shape (nel, nlk, go, go, 5)
+
+        Builds the per-(k, l) lamina matrix S as S_const + z[k, l] * S_z and contracts it
+        against eh via einsum. The cm_k == 10 variable-thickness layout (alternating t1/t2
+        per layer) from find_e_klij's special branch is reproduced via np.where on z.
+        """
+        # t0 = time.perf_counter()
+        nel = len(self.ELEMENTS[:, 0])
+        nlk = max(self.GEOMK["nlk"])
+
+        # --- z[k, l] : midplane offset of layer l in element k --------------------------------
+        t_arr   = np.asarray(self.GEOMK["t"],   dtype=float)               # (nel,)
+        nlk_arr = np.asarray(self.GEOMK["nlk"], dtype=int)                 # (nel,)
+        l_idx   = np.arange(nlk)                                            # (nlk,)
+
+        # Standard uniform-thickness layout (find_e_klij's default branch).
+        z_uniform = (-t_arr[:, None] / 2.0
+                     + (2 * l_idx[None, :] + 1) * t_arr[:, None] / (2.0 * nlk_arr[:, None]))   # (nel, nlk)
+
+        # cm_k == 10: alternating t1/t2 per layer (find_e_klij's special branch).
+        cm_arr    = np.asarray(self.MATK["cm"])
+        mask_cm10 = (cm_arr == 10)
+        if mask_cm10.any():
+            t1          = np.asarray(self.GEOMK["t"],  dtype=float)         # (nel,)
+            t2          = np.asarray(self.GEOMK["t2"], dtype=float)         # (nel,)
+            t_per_layer = np.where(l_idx[None, :] % 2 == 0,
+                                   t1[:, None], t2[:, None])                 # (nel, nlk)
+            half        = nlk_arr // 2
+            t_k_tot     = (half + 1) * t1 + half * t2                        # (nel,)
+            t_cum       = np.cumsum(t_per_layer, axis=1)                     # (nel, nlk)
+            z_cm10      = -t_k_tot[:, None] / 2.0 + (t_cum - 0.5 * t_per_layer)
+            z           = np.where(mask_cm10[:, None], z_cm10, z_uniform)
+        else:
+            z = z_uniform
+
+        # --- S[k, l] of shape (5, 8) ----------------------------------------------------------
+        # S = [[1, 0, 0, -z,  0,  0, 0, 0],
+        #      [0, 1, 0,  0, -z,  0, 0, 0],
+        #      [0, 0, 1,  0,  0, -z, 0, 0],
+        #      [0, 0, 0,  0,  0,  0, 1, 0],
+        #      [0, 0, 0,  0,  0,  0, 0, 1]]
+        S_const = np.zeros((5, 8))
+        S_const[0, 0] = 1.0
+        S_const[1, 1] = 1.0
+        S_const[2, 2] = 1.0
+        S_const[3, 6] = 1.0
+        S_const[4, 7] = 1.0
+        S_z = np.zeros((5, 8))
+        S_z[0, 3] = -1.0
+        S_z[1, 4] = -1.0
+        S_z[2, 5] = -1.0
+        S = S_const + z[..., None, None] * S_z                              # (nel, nlk, 5, 8)
+
+        # S (k, l, a, b) x eh (k, i, j, b) -> (k, l, i, j, a)
+        e_klij = np.einsum('klab,kijb->klija', S, eh)                       # (nel, nlk, go, go, 5)
+
+        # t1 = (time.perf_counter() - t0)
+        # print(f'Calculated layer strains e_klij in {t1/60:.2f} min.')
+        return e_klij
+
+
+    def find_e_vec(self, e0, eh, go):
+        """
+        Vectorised version of find_e. Drop-in replacement: same args / return as find_e.
+        Works for any Gauss order; in particular both go = 1 and go = 2.
+
+        Args:
+            e0  (np.arr): initial strains, shape (nel, nlk, go, go, 5)
+            eh  (np.arr): generalised strains, shape (nel, go, go, 8)
+            go  (int):    Gauss order
+
+        Returns:
+            e, ex, ey, gxy, e1, e3, th — same shapes / semantics as find_e
+
+        Delegates the S @ eh contraction to find_e_klij_vec, subtracts e0, and computes the
+        principal strain components in bulk. Triangle (i=1, j=1) sentinel is applied via
+        boolean masking, matching find_e.
+        """
+        # t0 = time.perf_counter()
+        e_klij_all = self.find_e_klij_vec(eh)                                # (nel, nlk, go, go, 5)
+        e = e_klij_all - e0
+
+        ex  = e[..., 0]
+        ey  = e[..., 1]
+        gxy = e[..., 2]
+
+        # Vectorised e_principal
+        r  = 0.5 * np.sqrt((ex - ey) ** 2 + gxy ** 2)
+        m  = 0.5 * (ex + ey)
+        e1 = m + r
+        e3 = m - r
+        with np.errstate(divide='ignore', invalid='ignore'):
+            th_nz = np.arctan(gxy / (2.0 * (e1 - ex)))
+        th_z = np.where(ex > ey, np.pi / 2,
+               np.where(ex < ey, 0.0, np.pi / 4))
+        th   = np.where(np.abs(gxy) > 0, th_nz, th_z)
+
+        # Triangle sentinel at (i=1, j=1); only reachable when go >= 2.
+        if go >= 2:
+            tri_mask = (np.asarray(self.ELS[4]) == 3)
+            SENT = -10**5
+            e  [tri_mask, :, 1, 1, :] = SENT
+            ex [tri_mask, :, 1, 1]    = SENT
+            ey [tri_mask, :, 1, 1]    = SENT
+            gxy[tri_mask, :, 1, 1]    = SENT
+            e1 [tri_mask, :, 1, 1]    = SENT
+            e3 [tri_mask, :, 1, 1]    = SENT
+            th [tri_mask, :, 1, 1]    = SENT
+
+        # t1 = (time.perf_counter() - t0)
+        # print(f'Calculated strains e, principals in {t1/60:.2f} min.')
+        return e, ex, ey, gxy, e1, e3, th
+
+
     def find_e0(self, go):
         nel = len(self.ELEMENTS[:, 0])
         nlk = max(self.GEOMK["nlk"])
@@ -2535,6 +3224,59 @@ class fem_func():
                             # if go == 1:
                             #     print('Element number: ', k)
                             #     print('Initial generalised strains: ', e[k])
+
+        return e, ex, ey, gxy, e1, e3, th
+
+
+    def find_e0_vec(self, go):
+        """
+        Vectorised version of find_e0.
+
+        Args:
+            go  (int): Gauss order
+
+        Returns:
+            e   (np.arr): initial generalised strains, shape (nel, nlk, go, go, 5)
+            ex  (np.arr): in-plane strain x-component,  shape (nel, nlk, go, go)
+            ey  (np.arr): in-plane strain y-component,  shape (nel, nlk, go, go)
+            gxy (np.arr): in-plane shear strain,        shape (nel, nlk, go, go)
+            e1  (np.arr): max principal strain,         shape (nel, nlk, go, go)
+            e3  (np.arr): min principal strain,         shape (nel, nlk, go, go)
+            th  (np.arr): principal direction angle,    shape (nel, nlk, go, go)
+
+        In the original find_e0, e_klij = [1,1,0,0,0]*ecs[k] is independent of layer l and Gauss point (i,j),
+        so ex == ey == ecs[k] and gxy == 0 throughout. Under those conditions e_principal collapses to
+        e1 = e3 = ecs[k] and th = pi/4, which lets us skip per-element calls entirely. Triangle elements get
+        the -1e5 sentinel at the (i=1, j=1) Gauss slot, matching the original.
+        """
+        nel = len(self.ELEMENTS[:, 0])
+        nlk = max(self.GEOMK["nlk"])
+
+        ecs = np.asarray(self.MATK["ecs"], dtype=float)                          # (nel,)
+        base = np.array([1.0, 1.0, 0.0, 0.0, 0.0])                                # (5,)
+
+        e   = np.broadcast_to(ecs[:, None, None, None, None] * base,
+                              (nel, nlk, go, go, 5)).copy()
+        ex  = np.broadcast_to(ecs[:, None, None, None],
+                              (nel, nlk, go, go)).copy()
+        ey  = ex.copy()
+        gxy = np.zeros((nel, nlk, go, go))
+
+        e1 = ex.copy()
+        e3 = ex.copy()
+        th = np.full((nel, nlk, go, go), np.pi / 4)
+
+        # Triangle sentinel at (i=1, j=1); only reachable when go >= 2.
+        if go >= 2:
+            tri_mask = (np.asarray(self.ELS[4]) == 3)
+            SENT = -10**5
+            e  [tri_mask, :, 1, 1, :] = SENT
+            ex [tri_mask, :, 1, 1]    = SENT
+            ey [tri_mask, :, 1, 1]    = SENT
+            gxy[tri_mask, :, 1, 1]    = SENT
+            e1 [tri_mask, :, 1, 1]    = SENT
+            e3 [tri_mask, :, 1, 1]    = SENT
+            th [tri_mask, :, 1, 1]    = SENT
 
         return e, ex, ey, gxy, e1, e3, th
 
@@ -2696,6 +3438,176 @@ class fem_func():
 
         return s
 
+    def find_s_vec(self, e, s_prev, go, dolinel=False):
+        """
+        Vectorised drop-in for find_s. Same signature as find_s. Per-Gauss-point computation
+        is preserved (every (k, i, j) becomes one sample in a flat batch of size nel*go*go
+        passed to ConstitutiveLaws), then reshaped back to the structured layout matching e.
+
+        Output:
+            s.shape = (nel, nlk, go, go, 3, 5)        # complex64
+                axes 0..3  : same (nel, nlk, go, go) prefix as e
+                axis 4     : complex-step perturbation index (mirrors find_s's last axis)
+                axis 5     : stress component (sx, sy, txy, txz, tyz)
+
+        find_s's object-array entries (instances with .sx, .sy, .txy, .txz, .tyz attributes)
+        become numerical entries indexed by axis 5. Imaginary parts of axis 4 carry the
+        complex-step derivative d s / d(ex, ey, gxy) for the in-plane components; out-of-plane
+        shear (txz, tyz) is linear in (gxz, gyz) and is not perturbed.
+
+        Branching on dolinel:
+            * dolinel = False (cm_klij = 3): 3 complex-step perturbations -> s[..., p, :] for p in 0..2.
+            * dolinel = True  (cm_klij = 1): single linear-elastic evaluation -> s[..., 0, :] only.
+
+        Mesh constraints (asserted upfront, since ConstitutiveLaws assumes uniform material):
+            * All elements share the same MATK row (material).
+            * All elements share the same per-layer GEOMK['rhox'], GEOMK['rhoy'].
+            * Reinforcement is isotropic: Esx == Esy.
+            * No cm_k == 10 element (ConstitutiveLaws supports cm_klij in {1, 3} only).
+        Element-0 values are then used for ConstitutiveLaws. Mixed meshes need the masked-op
+        rewrite in constitutive_laws.py; raise NotImplementedError on attempt.
+
+        s_prev is accepted for signature parity with find_s; ConstitutiveLaws does not consume
+        it for cm_klij in {1, 3} (no fixed-crack history), so it is otherwise unused.
+        """
+        # t0 = time.perf_counter()
+
+        # 0 Setup ------------------------------------------------------------------------------
+        nel   = len(self.ELEMENTS[:, 0])
+        nlk   = max(self.GEOMK["nlk"])
+        n_tot = nel * go * go
+
+        # 1 Uniform-mesh assertions ------------------------------------------------------------
+        def _uniform_MATK(key):
+            arr = np.asarray(self.MATK[key]).reshape(-1)
+            if arr.size > 1 and not np.all(arr == arr[0]):
+                raise NotImplementedError(
+                    f"find_s_vec: MATK[{key!r}] varies across elements; ConstitutiveLaws "
+                    f"requires uniform material. Use find_s, or rewrite the masked ops in "
+                    f"constitutive_laws.py to broadcast (n_tot, nl, 1) per-sample params."
+                )
+            return float(arr[0])
+
+        def _uniform_GEOMK_layer(key):
+            arr = np.asarray(self.GEOMK[key])
+            if arr.ndim == 2 and arr.shape[0] > 1 and not np.all(arr == arr[0:1, :]):
+                raise NotImplementedError(
+                    f"find_s_vec: GEOMK[{key!r}] varies across elements; not supported."
+                )
+            return arr[0, :] if arr.ndim == 2 else arr
+
+        cm_arr = np.asarray(self.MATK["cm"])
+        if (cm_arr == 10).any():
+            raise NotImplementedError(
+                "find_s_vec: ConstitutiveLaws does not implement cm_k == 10; use find_s."
+            )
+
+        # 2 Decide cm_klij (linear elastic override via dolinel) ------------------------------
+        cm_klij = 1 if dolinel else int(cm_arr.reshape(-1)[0])
+        if cm_klij not in (1, 3):
+            raise NotImplementedError(
+                f"find_s_vec: cm_klij={cm_klij} not supported by ConstitutiveLaws."
+            )
+
+        # 3 Build mat_dict and constants from element 0 ---------------------------------------
+        # ConstitutiveLaws stores a single steel material (Es, Esh, fsy, fsu) regardless of
+        # direction (see constitutive_laws.py:43-48). Anisotropic reinforcement *ratios*
+        # (rhox != rhoy) are fine and handled separately; what we forbid here is anisotropic
+        # steel *material* properties.
+        Esx = _uniform_MATK("Esx")
+        for x_key, y_key, label in (("Esx",  "Esy",  "Es"),
+                                     ("Eshx", "Eshy", "Esh"),
+                                     ("fsyx", "fsyy", "fsy"),
+                                     ("fsux", "fsuy", "fsu")):
+            if _uniform_MATK(x_key) != _uniform_MATK(y_key):
+                raise NotImplementedError(
+                    f"find_s_vec: anisotropic steel material ({x_key} != {y_key}) not supported "
+                    f"by ConstitutiveLaws -- it collapses both directions to a single {label!r} "
+                    f"value. Note: anisotropic reinforcement *ratios* (rhox != rhoy) ARE "
+                    f"supported and handled separately."
+                )
+
+        mat_dict = {
+            'ect': 0.0 * _uniform_MATK("fct") / _uniform_MATK("Ec"),    # matches MAT[5] in find_s
+            'ec0': _uniform_MATK("ec0"),
+            'Ec':  _uniform_MATK("Ec"),
+            'fct': _uniform_MATK("fct"),
+            'fcp': _uniform_MATK("fcp"),
+            'tb0': _uniform_MATK("tb0"),
+            'tb1': _uniform_MATK("tb1"),
+            'Es':  Esx,
+            'Esh': _uniform_MATK("Eshx"),
+            'fsy': _uniform_MATK("fsyx"),
+            'fsu': _uniform_MATK("fsux"),
+        }
+        constants = {
+            'nu':      _uniform_MATK("vc"),
+            'n_layer': nlk,
+            'rho_x':   _uniform_GEOMK_layer("rhox"),
+            'rho_y':   _uniform_GEOMK_layer("rhoy"),
+            'D':       _uniform_MATK("Dmax"),
+        }
+
+        # 4 Flatten e: (nel, nlk, go, go, 5) -> (n_tot, nlk, 5) -------------------------------
+        # All 5 strain components are kept; ConstitutiveLaws uses the first 3 for the in-plane
+        # constitutive law and the last 2 (gxz, gyz) for the analytical out-of-plane shear.
+        # Sample order n = k*go*go + i*go + j.
+        e_in   = np.transpose(e, (0, 2, 3, 1, 4))                            # (nel, go, go, nlk, 5)
+        e_flat = e_in.reshape(n_tot, nlk, 5)                                  # (n_tot, nlk, 5)
+
+        # Identify triangle (i=1, j=1) sentinel samples: find_e_vec writes -1e5 there. We must
+        # exclude them from ConstitutiveLaws -- otherwise the garbage strain feeds into divides
+        # and emits "invalid value encountered in divide" warnings. The scalar pipeline skips
+        # those samples via an if-branch in find_s, so it never sees them either.
+        if go >= 2:
+            k_idx    = np.repeat(np.arange(nel), go * go)
+            ij       = np.tile(np.arange(go * go), nel)
+            i_idx    = ij // go
+            j_idx    = ij %  go
+            types    = np.asarray(self.ELS[4])
+            sentinel = (types[k_idx] == 3) & (i_idx == 1) & (j_idx == 1)
+        else:
+            sentinel = np.zeros(n_tot, dtype=bool)
+        valid   = ~sentinel
+        e_valid = e_flat[valid]                                               # (n_valid, nlk, 5)
+
+        # 5 Per-Gauss-point evaluation via ConstitutiveLaws -----------------------------------
+        s_flat = np.zeros((n_tot, nlk, 3, 5), dtype=np.complex64)
+        EPS_J = 1e-16j
+
+        # Suppress masked-out divide-by-zero / 0/0 warnings inherent to vectorised constitutive
+        # code: ConstitutiveLaws uses `np.where(cond, a/b, fallback)` patterns where numpy
+        # evaluates a/b even on the False branch (and the result is discarded). The scalar
+        # `stress` class avoids this by using Python if/else, so the unvectorised pipeline
+        # doesn't emit the warning.
+        with np.errstate(invalid='ignore', divide='ignore'):
+            if cm_klij == 3:
+                # 3 complex-step perturbations -> imag(s[..., p, :]) is d s / d e_p for p in {0,1,2}
+                # Only the first 3 strain components (ex, ey, gxy) are perturbed -- matches find_s.
+                for p, pert in enumerate([(EPS_J, 0, 0, 0, 0),
+                                           (0, EPS_J, 0, 0, 0),
+                                           (0, 0, EPS_J, 0, 0)]):
+                    e_p = e_valid + np.array(pert, dtype=np.complex64)
+                    cl  = ConstitutiveLaws(e_p, constants, mat_dict, cm_klij=cm_klij)
+                    s_flat[valid, :, p, :] = cl.out().squeeze(-1)             # (n_valid, nlk, 5)
+            else:  # cm_klij == 1, linear elastic: single eval, only slot 0
+                cl = ConstitutiveLaws(e_valid, constants, mat_dict, cm_klij=cm_klij)
+                s_flat[valid, :, 0, :] = cl.out().squeeze(-1).astype(np.complex64)
+
+        # 6 Reshape back to structured (nel, nlk, go, go, 3, 5) -------------------------------
+        s = s_flat.reshape(nel, go, go, nlk, 3, 5)
+        s = np.transpose(s, (0, 3, 1, 2, 4, 5))                              # (nel, nlk, go, go, 3, 5)
+        s = np.ascontiguousarray(s)
+
+        # 7 Triangle sentinel at (i=1, j=1) — only reachable for go >= 2 ----------------------
+        if go >= 2:
+            tri_mask = (np.asarray(self.ELS[4]) == 3)
+            s[tri_mask, :, 1, 1, :, :] = -10**5
+
+        # t1 = (time.perf_counter() - t0)
+        # print(f'Calculated layer stresses s in {t1/60:.2f} min.')
+        return s
+
 
     def find_s0(self, go):
         """ ---------------- Calculate residual stress state caused by internal strains (shrinkage) ---------------------
@@ -2713,7 +3625,38 @@ class fem_func():
                     for j in range(go):
                         s0[k][l][i][j][:] = self.find_s0_klij(k,l,i,j)
         return s0
-    
+
+
+    def find_s0_vec(self, go):
+        """
+        Vectorised version of find_s0.
+
+        Args:
+            go  (int): Gauss order
+
+        Returns:
+            s0  (np.arr): residual element stresses [s_x, s_y, t_xy], shape (nel, nlk, go, go, 3)
+
+        find_s0_klij(k, l, i, j) only depends on k via -Ec[k]*ecs[k]/(1+vc[k]^2) * [1,1,0], so we
+        build that scalar coefficient once per element and broadcast over (l, i, j). The original
+        find_s0 has no triangle-Gauss-point sentinel, so none is applied here either.
+        """
+        nel = len(self.ELEMENTS[:, 0])
+        nlk = max(self.GEOMK["nlk"])
+
+        Ec  = np.asarray(self.MATK["Ec"],  dtype=float)
+        ecs = np.asarray(self.MATK["ecs"], dtype=float)
+        vc  = np.asarray(self.MATK["vc"],  dtype=float)
+
+        coeff = -Ec * ecs / (1.0 + vc ** 2)                       # (nel,)
+        base  = np.array([1.0, 1.0, 0.0])                         # (3,)
+
+        s0 = np.broadcast_to(coeff[:, None, None, None, None] * base,
+                             (nel, nlk, go, go, 3)).copy()
+
+        return s0
+
+
     def find_sh0(self):
         """ ---------------- Novel initialisation for NN-hybrid analysis  ---------------------
             --------------------------------------------    INPUT: ------------------------------------------------------
@@ -2785,6 +3728,76 @@ class fem_func():
         return ssx,ssy,spx,spy
 
 
+    def find_ss_vec(self, e, cmk):
+        """
+        Vectorised drop-in for find_ss. Signature differs: takes strain `e` (steel stress is
+        a function of strain, not of the sigma stresses carried by the vec `s` array).
+
+        Args:
+            e    (np.arr): strain from find_e_vec, shape (nel, nlk, go, go, 5)
+            cmk  (array-like): per-element cm identifier, shape (nel,)
+
+        Returns:
+            ssx, ssy, spx, spy : shape (nel, nlk, go, go). spx, spy are sentinel everywhere
+            (CFRP is not implemented in ConstitutiveLaws, matching its "skipped" comment).
+
+        Constitutive: bilinear steel law -- matches find_ss exactly in compression and
+        elastic tension. For cracked-tension where the scalar pipeline uses ssr (TCM), this
+        returns the bare bilinear value. ssx, ssy are post-processing outputs (the FEM solve
+        does not consume them), so the simplification is generally fine.
+
+        Sentinel positions (filled with -1e-5, matching find_ss):
+            * cm < 1.5 or cm == 10
+            * triangle (i=1, j=1) for go >= 2
+        """
+        nel = e.shape[0]
+        nlk = e.shape[1]
+        go  = e.shape[2]
+
+        SENT = -1e-5
+        ssx = np.full((nel, nlk, go, go), SENT)
+        ssy = np.full((nel, nlk, go, go), SENT)
+        spx = np.full((nel, nlk, go, go), SENT)
+        spy = np.full((nel, nlk, go, go), SENT)
+
+        cm_arr   = np.asarray(cmk)
+        valid_cm = (cm_arr >= 1.5) & (cm_arr != 10)
+
+        if valid_cm.any():
+            # Uniform-mesh material assumption (matches find_s_vec): element-0 values.
+            Es  = float(np.asarray(self.MATK["Esx"]).reshape(-1)[0])
+            Esh = float(np.asarray(self.MATK["Eshx"]).reshape(-1)[0])
+            fsy = float(np.asarray(self.MATK["fsyx"]).reshape(-1)[0])
+            esy = fsy / Es
+
+            def _ss_bilin(strain):
+                return np.where(
+                    strain >= esy,
+                    fsy + Esh * (strain - esy),
+                    np.where(strain <= -esy,
+                             -fsy + Esh * (strain + esy),
+                             strain * Es),
+                )
+
+            ssx_calc = _ss_bilin(e[..., 0])
+            ssy_calc = _ss_bilin(e[..., 1])
+
+            vmask = np.broadcast_to(valid_cm[:, None, None, None], (nel, nlk, go, go))
+            ssx = np.where(vmask, ssx_calc, ssx)
+            ssy = np.where(vmask, ssy_calc, ssy)
+
+        # Triangle (i=1, j=1) sentinel for go >= 2
+        if go >= 2:
+            types    = np.asarray(self.ELS[4])
+            tri_mask = (types == 3)
+            ssx[tri_mask, :, 1, 1] = SENT
+            ssy[tri_mask, :, 1, 1] = SENT
+            spx[tri_mask, :, 1, 1] = SENT
+            spy[tri_mask, :, 1, 1] = SENT
+
+        return ssx, ssy, spx, spy
+
+
     def find_sc(self, e1, e3):
         """ ---------------------- Calculate element concrete principla compressive stresses-----------------------------
             --------------------------------------------    INPUT: ------------------------------------------------------
@@ -2810,6 +3823,29 @@ class fem_func():
 
 
     """--------------------------------------------- Solve & Control ----------------------------------------------------"""
+    def solve_sys_vec(self, B, fe, cDOF, cVAL, cmk, e, s):
+        """
+        Vectorised drop-in for solve_sys (NLFEA only -- no perm / perm1, no NN). Routes the
+        stiffness assembly through k_glob_vec instead of k_glob, so the numerical s array
+        from find_s_vec is consumed correctly instead of being fed back into get_et_vb which
+        expects object-dtype stress instances (.sx, .sy, .txy attributes).
+
+        Same return contract as solve_sys: (u, D_tot).
+        """
+        K, D_tot = self.k_glob_vec(B, e, s, cmk, self.gauss_order)
+
+        Kcond  = self.m_stat_con(K, cDOF)
+        fecond = self.v_stat_con(fe, cDOF, cVAL)
+
+        start = time.time()
+        lu, piv = lu_factor(Kcond)
+        u = lu_solve((lu, piv), fecond)
+        end = time.time()
+        time_Kinv._updatetime(delta_t=end - start)
+
+        return u, D_tot
+
+
     def solve_sys(self, B,fe, cDOF,cVAL, cmk,e,s, perm = None, perm1 = None):
         """ ------------------------------------------- Solve System ----------------------------------------------------
             --------------------------------------------    INPUT: ------------------------------------------------------

@@ -36,14 +36,14 @@ inp_run = {
     "mat_tot_dict": mat_tot_dict,
     "model_no": [35],                                           # epoch number of NN model to use (int)
     "numit": 9,
-    "predict": [True, True]                                     # [predict_sig, predict_D]
+    "predict": [False, False]                                     # [predict_sig, predict_D]
 }
 
 CONTINUE = True                                                 # if CONTINUE = True: continues iteration from previous load level, 
                                                                 # does not start every load level from linear elastic
                                                                 # if only calculating one load level, please use Continue = False
 
-os.environ["WANDB_MODE"] = "offline"
+os.environ["WANDB_MODE"] = "disabled"
 
 
 # rho_y = 1%
