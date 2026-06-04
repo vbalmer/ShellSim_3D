@@ -91,12 +91,16 @@ class fem_func():
 
     # Load_el,Load_n
 
-    def check_range_NN(self, vec:np.array, id:str, predict = 'sig', cmk=3):
+    def check_range_NN(self, vec:np.array, id:str, predict = 'sig', cmk=3, return_key=False):
         '''
         Checks whether the given vector vec lies within range of training data. If not, prints error message (does not stop programme)
         vec         (np.array)      vector to be checked for range
                                     expected shapes: 'sig' (1,8), 'eps-t' (1,8), 'D' (1,8,8)
-        id          (str)           can be 'sig', 'eps-t' or 'D' 
+        id          (str)           can be 'sig', 'eps-t' or 'D'
+        return_key  (bool)          If True, return the model key ('sig_I'/'sig_II'/'sig_III'/'D')
+                                    instead of self.model_path['model'][key]. Useful when the
+                                    caller holds a `loaded_models` dict keyed identically and
+                                    wants to look up the preloaded model directly.
         '''
         if id == 'eps-t' and predict == 'sig':
             # define strain ranges of models (acc. to 241208_DetailedDocumentation)
@@ -134,29 +138,34 @@ class fem_func():
             mask_III = (v >= min_III) & (v <= max_III)
             
             if mask_I.all():
-                chosen_model_path = self.model_path['model']['sig_I']
+                key = 'sig_I'
                 # print('Chosen model is model I.')
                 id_choice = '_I'
             elif mask_II.all():
-                chosen_model_path = self.model_path['model']['sig_II']
+                key = 'sig_II'
                 # print('Chosen model is model II.')
                 id_choice = '_II'
             elif mask_III.all():
-                chosen_model_path = self.model_path['model']['sig_III']
+                key = 'sig_III'
                 # print('Chosen model is model III.')
                 id_choice = '_III'
-            else: 
-                chosen_model_path = self.model_path['model']['sig_III']
+            else:
+                key = 'sig_III'
                 # print('Some values are outside the strain boundaries of the sampled data. Chosen model is still model III.')
                 id_choice = '_III'
+            chosen_model_path = self.model_path['model'][key]
 
         elif id == 'eps-t' and predict == 'D':
-            chosen_model_path = self.model_path['model']['D']
+            key = 'D'
+            chosen_model_path = self.model_path['model'][key]
 
 
-        else:          
+        else:
+            key = None
             chosen_model_path = None
 
+        if return_key:
+            return key
         return chosen_model_path
     
 
@@ -1733,11 +1742,11 @@ class fem_func():
                 elif self.MATK["cm"][k] == 1 or self.MATK["cm"][k] == 10:
                     raise RuntimeError('This function should not be called if the material model is linear elastic.')
                 ######## make prediction for D with NN ########
-                if i==0 and j == 0 and k == 0: 
-                    mat_NN = make_NN_prediction(input_j, predict = 'D', model_path = chosen_model_path)
-                else: 
+                if i==0 and j == 0 and k == 0:
+                    mat_NN = make_NN_prediction(input_j, predict = 'D', model_path = chosen_model_path, non_batchwise=True)
+                else:
                     with HiddenPrints():
-                        mat_NN = make_NN_prediction(input_j, predict = 'D', model_path = chosen_model_path)
+                        mat_NN = make_NN_prediction(input_j, predict = 'D', model_path = chosen_model_path, non_batchwise=True)
                 D_pred = mat_NN['D']
                 self.check_range_NN(D_pred,'D', cmk = self.MATK["cm"][k])
                 De = D_pred[0,:,:]
@@ -1819,12 +1828,12 @@ class fem_func():
                 elif self.MATK["cm"][k] == 1 or self.MATK["cm"][k] == 10:
                     raise RuntimeError('This function should not be called if the material model is linear elastic.')
                 ######## make prediction for D with NN ########
-                if k == 0 and i == 0 and j == 0: 
-                    mat_NN = make_NN_prediction(input_j, predict = 'D', model_path = chosen_model_path)
+                if k == 0 and i == 0 and j == 0:
+                    mat_NN = make_NN_prediction(input_j, predict = 'D', model_path = chosen_model_path, non_batchwise=True)
                     # mat_NN = predict_sig_D(input_j, chosen_data_path, chosen_model_path, 'train', transf_type = 'st-stitched', predict = 'D', sc=False, model_dim = model_dim)
-                else: 
+                else:
                     with HiddenPrints():
-                        mat_NN = make_NN_prediction(input_j, predict = 'D', model_path = chosen_model_path)
+                        mat_NN = make_NN_prediction(input_j, predict = 'D', model_path = chosen_model_path, non_batchwise=True)
                         # mat_NN = predict_sig_D(input_j, chosen_data_path, chosen_model_path, 'train', transf_type = 'st-stitched', predict = 'D', sc=False, model_dim = model_dim)
                 D_pred = mat_NN['D']
                 self.check_range_NN(D_pred,'D', cmk = self.MATK["cm"][k])
@@ -1876,6 +1885,184 @@ class fem_func():
             print(Jdet)
 
         return Ke, De_
+
+
+    def k_k_nn_num_vec(self, B, e, s, eh, sh, cmk, go, model_dim, scenario, loaded_models=None):
+        """
+        Vectorised drop-in for k_k_nn_num. Implemented for model_dim == 'THREEDIM' only.
+
+        For each (k, i, j):
+            * Predict the upper-left 6x6 block of De from the NN using eh as input.
+            * Compute the out-of-plane shear block Dsh (2x2) numerically via the same
+              complex-step path as k_k_vec (`dh_klij_vec`).
+            * Combine: De[0:6, 0:6] = D_NN; De[6:8, 6:8] = Dsh; off-block zeros.
+            * Per-element Ke assembled block-by-block matching k_k_nn_num's original
+              formula: Ke = Kme + Kbe + Kse + Kmbe + Kbme + drilling, with
+                  Kmbe = w*Jdet * Bm^T Dmbh Bb
+                  Kbme = w*Jdet * Bm^T Dbmh Bb 
+
+        Args:
+            B    (dict):   B-matrix container (uses ["Bm"]["r"], ["Bb"]["r"], ["Bs"]["r"], ["Jdet"]).
+            e    (np.arr): strains from find_e_vec, shape (nel, nlk, go, go, 5).
+            s    (np.arr): stresses from find_s_vec, shape (nel, nlk, go, go, 3, 5).
+            eh   (np.arr): generalised strains, shape (nel, go, go, 8) -- NN input.
+            sh   (np.arr): generalised stresses, shape (nel, go, go, 8). Accepted for
+                           signature parity; not consumed (matches k_k_nn_num).
+            cmk  (array-like): per-element cm. Restricted to all cm == 3.
+            go   (int): Gauss order.
+            model_dim (str): only 'THREEDIM' implemented.
+            scenario  (int): boundary scenario code, passed to filter_small_stiffness.
+
+        Returns:
+            Ke_dict (dict): {k: Ke[k]} per element.
+            De      (np.arr): per-(k, i, j) 8x8 tangent, shape (nel, go, go, 8, 8).
+
+        """
+        if model_dim != 'THREEDIM':
+            raise NotImplementedError(
+                f"k_k_nn_num_vec: only model_dim='THREEDIM' implemented; got {model_dim!r}"
+            )
+
+        nel = len(self.ELEMENTS[:, 0])
+        nlk = max(self.GEOMK["nlk"])
+
+        cm_arr = np.asarray(cmk)
+        if not (cm_arr == 3).all():
+            raise NotImplementedError("k_k_nn_num_vec: only cm == 3 supported.")
+        cmk_val = int(cm_arr.reshape(-1)[0])
+
+        # 1 Numerical Dsh (out-of-plane shear) -- analytical per-layer + layer integration ----
+        # Per-layer Ds_kl = 5/6 * G * I2 with G = Ec/(2*(1+vc)).
+        Ec = np.asarray(self.MATK["Ec"], dtype=float)                        # (nel,)
+        vc = np.asarray(self.MATK["vc"], dtype=float)                        # (nel,)
+        G  = Ec / (2.0 * (1.0 + vc))                                          # (nel,)
+        I2 = np.eye(2)
+        Ds = (5.0 / 6.0) * G[:, None, None, None] * np.broadcast_to(I2, (nel, nlk, 2, 2))
+        Ds = np.ascontiguousarray(Ds)                                         # (nel, nlk, 2, 2)
+
+        t_arr   = np.asarray(self.GEOMK["t"],   dtype=float)
+        nlk_arr = np.asarray(self.GEOMK["nlk"], dtype=int)
+        l_idx   = np.arange(nlk)
+        dz = np.broadcast_to(t_arr[:, None] / nlk_arr[:, None], (nel, nlk)).copy()
+        layer_mask = l_idx[None, :] < nlk_arr[:, None]
+        dz = dz * layer_mask
+
+        Dsh_kl   = np.sum(Ds * dz[:, :, None, None], axis=1)                 # (nel, 2, 2)
+        Dsh_full = np.broadcast_to(Dsh_kl[:, None, None, :, :],
+                                   (nel, go, go, 2, 2))                       # (nel, go, go, 2, 2)
+
+        # 2 NN prediction for 6x6 D matrix ----------------------------------------------------
+        n_tot = nel * go * go
+        k_idx = np.repeat(np.arange(nel), go * go)
+        ij    = np.tile(np.arange(go * go), nel)
+        i_idx = ij // go
+        j_idx = ij %  go
+        types_arr = np.asarray(self.ELS[4])
+        sentinel  = (types_arr[k_idx] == 3) & (i_idx == 1) & (j_idx == 1)
+        valid     = ~sentinel
+
+        eh_flat  = eh.reshape(n_tot, 8)
+        input_nn = eh_flat[valid, :6]                                         # (n_valid, 6)
+
+        # Pick the model: if loaded_models is provided, use the preloaded triple; otherwise
+        # fall back to the path (which make_NN_prediction will load on the spot).
+        if loaded_models is not None:
+            chosen_key   = self.check_range_NN(eh_flat[valid], 'eps-t', predict='D',
+                                               cmk=cmk_val, return_key=True)
+            chosen_model = loaded_models[chosen_key]
+        else:
+            chosen_model = self.check_range_NN(eh_flat[valid], 'eps-t', predict='D',
+                                               cmk=cmk_val)
+
+        mat_NN = make_NN_prediction(input_nn, predict='D', model=chosen_model, non_batchwise=True)
+        D_pred_valid = np.asarray(mat_NN['D'])                                # (n_valid, 6, 6)
+        self.check_range_NN(D_pred_valid, 'D', cmk=cmk_val)
+
+        # 2b Apply filter_small_stiffness to the membrane 3x3 block (D_NN[0:3, 0:3]).
+        # filter_small_stiffness only fires for specific scenarios; replicate that here.
+        if scenario in (8, 9, 109, 110, 111, 112):
+            # Uniform-material assumption: same Ec, t across elements.
+            Ec0 = float(np.asarray(self.MATK["Ec"]).reshape(-1)[0])
+            t0  = float(np.asarray(self.GEOMK["t"]).reshape(-1)[0])
+            ff  = Ec0 / 10.0
+            D_min_22 = t0 * (ff / 2.0)                                        # shear stiffness floor
+            mask_lo = D_pred_valid[:, 2, 2] < D_min_22
+            D_pred_valid[mask_lo, 2, 2] = D_min_22
+
+        # Scatter to full (n_tot, 6, 6) and reshape to (nel, go, go, 6, 6).
+        D_pred_full = np.zeros((n_tot, 6, 6))
+        D_pred_full[valid] = D_pred_valid
+        D_pred_struct = D_pred_full.reshape(nel, go, go, 6, 6)
+
+        # 3 Combine 8x8 De -- NN for upper-left 6x6, numerical Dsh for [6:8, 6:8] -----------
+        De = np.zeros((nel, go, go, 8, 8))
+        De[..., 0:6, 0:6] = D_pred_struct
+        De[..., 6:8, 6:8] = Dsh_full
+
+        # 4 Per-element-type Ke via batched block-wise einsums -------------------------------
+        Ke_dict = {}
+        for n_nodes, ndof in ((4, 24), (3, 18)):
+            els = np.where(types_arr == n_nodes)[0]
+            E_count = len(els)
+            if E_count == 0:
+                continue
+
+            gp, w = self.gauss_points(n_nodes, go)
+            w_grid = np.outer(w, w).copy()
+            if n_nodes == 3 and go >= 2:
+                w_grid[1, 1] = 0.0
+
+            B_batch    = np.zeros((E_count, go, go, 8, ndof))
+            Jdet_batch = np.zeros((E_count, go, go))
+            for idx, k in enumerate(els):
+                for i in range(go):
+                    for j in range(go):
+                        if n_nodes == 3 and i == 1 and j == 1:
+                            continue
+                        Bm = B["Bm"]["r"][k][i][j]
+                        Bb = B["Bb"]["r"][k][i][j]
+                        Bs = B["Bs"]["r"][k][i][j]
+                        B_batch[idx, i, j]    = np.vstack([Bm, Bb, Bs])
+                        Jdet_batch[idx, i, j] = B["Jdet"][k][i][j]
+
+            weight = w_grid[None, :, :] * Jdet_batch
+
+            Bm_b = B_batch[..., 0:3, :]
+            Bb_b = B_batch[..., 3:6, :]
+            Bs_b = B_batch[..., 6:8, :]
+
+            De_g   = De[els]
+            Dmh_g  = De_g[..., 0:3, 0:3]
+            Dmbh_g = De_g[..., 0:3, 3:6]
+            Dbmh_g = De_g[..., 3:6, 0:3]
+            Dbh_g  = De_g[..., 3:6, 3:6]
+            Dsh_g  = De_g[..., 6:8, 6:8]
+
+            # Block einsums matching k_k_nn_num's exact assembly:
+            Kme_batch  = np.einsum('eij,eijpa,eijpq,eijqb->eab', weight, Bm_b, Dmh_g,  Bm_b)
+            Kbe_batch  = np.einsum('eij,eijpa,eijpq,eijqb->eab', weight, Bb_b, Dbh_g,  Bb_b)
+            Kse_batch  = np.einsum('eij,eijpa,eijpq,eijqb->eab', weight, Bs_b, Dsh_g,  Bs_b)
+            Kmbe_batch = np.einsum('eij,eijpa,eijpq,eijqb->eab', weight, Bm_b, Dmbh_g, Bb_b)
+            # Note: Kbme uses Bm^T ... Bb (not Bb^T ... Bm), matching the original k_k_nn_num.
+            Kbme_batch = np.einsum('eij,eijpa,eijpq,eijqb->eab', weight, Bm_b, Dbmh_g, Bb_b)
+
+            Ke_batch = Kme_batch + Kbe_batch + Kse_batch + Kmbe_batch + Kbme_batch
+
+            # Drilling / coplanar correction (same as k_k_vec)
+            A_k_arr = weight.sum(axis=(1, 2))
+            for idx, k in enumerate(els):
+                n_k = self.ELEMENTS[k]
+                iscoplk = 1 if (n_k.any() in self.copln) else 0
+                Ke_i = Ke_batch[idx]
+                if iscoplk:
+                    Tkr = self.rotLG(k)[1]
+                    if n_nodes == 3:
+                        Tkr = Tkr[:18, :18]
+                    t_k = self.GEOMK["t"][k]
+                    Ke_i = Ke_i + iscoplk * A_k_arr[idx] * t_k * 33600 * Tkr * 1e-8
+                Ke_dict[int(k)] = Ke_i
+
+        return Ke_dict, De
 
 
 
@@ -2036,6 +2223,50 @@ class fem_func():
             K = self.m_assemble(Ke, K, nodes)
             D_tot_[k,:,:,:,:] = De
         D_tot = D_tot_
+        end = time.time()
+        time_K._updatetime(delta_t=end - start)
+        return K, D_tot
+
+
+    def k_glob_nn_num_vec(self, B, e, s, eh, sh, cmk, go, model_dim, scenario, loaded_models=None):
+        """
+        Vectorised drop-in for k_glob_nn_num. Delegates per-element Ke assembly to
+        k_k_nn_num_vec; the global assembly is still a per-element loop over m_assemble
+        because each element's node set differs.
+
+        Restrictions:
+            * model_dim == 'THREEDIM' only (inherited from k_k_nn_num_vec).
+            * cm == 3 only.
+
+        Args:
+            B    (dict):  B-matrix container (forwarded to k_k_nn_num_vec).
+            e, s, eh, sh: standard FEM tensors.
+            cmk  (array-like): per-element cm.
+            go   (int):   Gauss order.
+            model_dim (str), scenario (int): forwarded to k_k_nn_num_vec.
+            loaded_models (dict|None): forwarded to k_k_nn_num_vec; if provided, the NN
+                                       model is taken from this dict (key 'D') instead of
+                                       being loaded from disk on every call.
+
+        Returns:
+            K     (np.arr): global stiffness, shape (6*nn, 6*nn).
+            D_tot (np.arr): per-(k, i, j) 8x8 tangent, shape (nel, go, go, 8, 8).
+        """
+        start = time.time()
+
+        NODESG = self.COORD["n"][0]
+        nn  = len(NODESG[:, 0])
+        nel = len(self.ELEMENTS[:, 0])
+
+        Ke_dict, D_tot = self.k_k_nn_num_vec(B, e, s, eh, sh, cmk, go, model_dim, scenario,
+                                             loaded_models=loaded_models)
+
+        K = np.zeros((6 * nn, 6 * nn))
+        for k in range(nel):
+            nodes = self.ELEMENTS[k, :]
+            nodes = nodes[nodes < 10**5]
+            K = self.m_assemble(Ke_dict[int(k)], K, nodes)
+
         end = time.time()
         time_K._updatetime(delta_t=end - start)
         return K, D_tot
@@ -2880,16 +3111,22 @@ class fem_func():
         time_sh._updatetime(delta_t=end - start)
         return sh
 
-    def find_sh_nn_vec(self, eh, go, model_dim):
+    def find_sh_nn_vec(self, eh, go, model_dim, loaded_models=None):
         """
-        Vectorised drop-in for find_sh_nn. Same signature. One batched NN call replaces the
-        triple-nested (k, i, j) loop.
+        Vectorised drop-in for find_sh_nn. Same signature plus an optional `loaded_models`
+        dict for skipping disk-loading of the NN on every call. One batched NN call replaces
+        the triple-nested (k, i, j) loop.
 
         Args:
-            eh         (np.arr): generalised strains from find_eh / find_eh_vec, shape (nel, go, go, 8)
-            go         (int):    Gauss order
-            model_dim:           accepted for signature parity with find_sh_nn (only used in
-                                 commented-out predict_sig_D path of the original)
+            eh             (np.arr): generalised strains from find_eh / find_eh_vec,
+                                     shape (nel, go, go, 8)
+            go             (int):    Gauss order
+            model_dim:               accepted for signature parity with find_sh_nn (only used in
+                                     commented-out predict_sig_D path of the original)
+            loaded_models  (dict|None): {'sig_I': triple, 'sig_II': triple, 'sig_III': triple}
+                                     where each triple is (inp, test_model, stats) from
+                                     load_NN_model. If None, the model is loaded from disk on
+                                     the fly via self.model_path (slow path, kept for back-compat).
 
         Returns:
             sh         (np.arr): generalised stresses, shape (nel, go, go, 8). The NN predicts
@@ -2901,12 +3138,6 @@ class fem_func():
             * All elements must have cm == 3 (RC concrete). cm == 1 and cm == 10 raise Warning
               in find_sh_nn ("outdated, please check at next use") and are not exercised here.
 
-        Model selection: the original picks an NN model (I, II, or III) per sample via
-        check_range_NN; this function picks ONE model for the whole batch by passing the full
-        flat input to check_range_NN. check_range_NN's `.all()` test naturally promotes to the
-        smallest model containing ALL samples, so the chosen model is at least as permissive
-        as any per-sample choice -- correct, but potentially coarser than the original for
-        small-strain samples in a mixed-strain batch.
         """
         start = time.time()
 
@@ -2940,11 +3171,18 @@ class fem_func():
         helper_t    = self.GEOMK['t'][0] * np.ones((n_tot, 1))
         range_input = np.concatenate((eh_flat[valid], helper_t[valid]), axis=1)  # (n_valid, 9)
         cmk         = int(cm_arr.reshape(-1)[0])
-        chosen_model_path = self.check_range_NN(range_input, 'eps-t', cmk=cmk)
+
+        # Pick the model: if loaded_models is provided, use the preloaded triple; otherwise
+        # fall back to the path (which make_NN_prediction will load on the spot).
+        if loaded_models is not None:
+            chosen_key   = self.check_range_NN(range_input, 'eps-t', cmk=cmk, return_key=True)
+            chosen_model = loaded_models[chosen_key]
+        else:
+            chosen_model = self.check_range_NN(range_input, 'eps-t', cmk=cmk)
 
         # Single batched NN call on valid samples (cm == 3 path: first 6 components only).
         input_nn = eh_flat[valid, :6]                                       # (n_valid, 6)
-        mat_NN   = make_NN_prediction(input_nn, predict='sig', model_path=chosen_model_path)
+        mat_NN   = make_NN_prediction(input_nn, predict='sig', model=chosen_model)
         sig_pred = mat_NN['sig']                                            # (n_valid, 6)
 
         # Output-side range check (same call shape as the original's per-sample post-check).
@@ -2955,7 +3193,20 @@ class fem_func():
         sig_full[valid] = sig_pred
         sh[..., :6] = sig_full.reshape(nel, go, go, 6)
 
-        # Triangle (i=1, j=1) sentinel for go >= 2 (overwrites all 8 components).
+        # Out-of-plane shear forces (qx, qy) -- analytical, matching ConstitutiveLaws.sigma_shear:
+        #   txz_layer = 5/6 * G * gxz,   tyz_layer = 5/6 * G * gyz   (G = Ec / (2*(1+vc)))
+        # gxz, gyz are constant through thickness (no z-dependence in find_e_klij's S), so the
+        # thickness integral is just (5/6 * G * gxz) * t for qx (and analogously for qy).
+        Ec    = np.asarray(self.MATK["Ec"], dtype=float)                # (nel,)
+        vc    = np.asarray(self.MATK["vc"], dtype=float)                # (nel,)
+        G     = Ec / (2.0 * (1.0 + vc))                                  # (nel,)
+        t_arr = np.asarray(self.GEOMK["t"], dtype=float)                 # (nel,)
+        coeff = (5.0 / 6.0) * G * t_arr                                  # (nel,) = (5/6) * G * t
+        sh[..., 6] = coeff[:, None, None] * eh[..., 6]                   # qx
+        sh[..., 7] = coeff[:, None, None] * eh[..., 7]                   # qy
+
+        # Triangle (i=1, j=1) sentinel for go >= 2 (overwrites all 8 components, including
+        # the qx, qy we just wrote -- matches find_sh_nn's behaviour).
         if go >= 2:
             tri_mask = (types == 3)
             sh[tri_mask, 1, 1, :] = -10**5
@@ -3445,7 +3696,7 @@ class fem_func():
         passed to ConstitutiveLaws), then reshaped back to the structured layout matching e.
 
         Output:
-            s.shape = (nel, nlk, go, go, 3, 5)        # complex64
+            s.shape = (nel, nlk, go, go, 3, 5)        # complex128
                 axes 0..3  : same (nel, nlk, go, go) prefix as e
                 axis 4     : complex-step perturbation index (mirrors find_s's last axis)
                 axis 5     : stress component (sx, sy, txy, txz, tyz)
@@ -3572,7 +3823,7 @@ class fem_func():
         e_valid = e_flat[valid]                                               # (n_valid, nlk, 5)
 
         # 5 Per-Gauss-point evaluation via ConstitutiveLaws -----------------------------------
-        s_flat = np.zeros((n_tot, nlk, 3, 5), dtype=np.complex64)
+        s_flat = np.zeros((n_tot, nlk, 3, 5), dtype=np.complex128)
         EPS_J = 1e-16j
 
         # Suppress masked-out divide-by-zero / 0/0 warnings inherent to vectorised constitutive
@@ -3587,12 +3838,12 @@ class fem_func():
                 for p, pert in enumerate([(EPS_J, 0, 0, 0, 0),
                                            (0, EPS_J, 0, 0, 0),
                                            (0, 0, EPS_J, 0, 0)]):
-                    e_p = e_valid + np.array(pert, dtype=np.complex64)
+                    e_p = e_valid + np.array(pert, dtype=np.complex128)
                     cl  = ConstitutiveLaws(e_p, constants, mat_dict, cm_klij=cm_klij)
                     s_flat[valid, :, p, :] = cl.out().squeeze(-1)             # (n_valid, nlk, 5)
             else:  # cm_klij == 1, linear elastic: single eval, only slot 0
                 cl = ConstitutiveLaws(e_valid, constants, mat_dict, cm_klij=cm_klij)
-                s_flat[valid, :, 0, :] = cl.out().squeeze(-1).astype(np.complex64)
+                s_flat[valid, :, 0, :] = cl.out().squeeze(-1).astype(np.complex128)
 
         # 6 Reshape back to structured (nel, nlk, go, go, 3, 5) -------------------------------
         s = s_flat.reshape(nel, go, go, nlk, 3, 5)
@@ -3833,6 +4084,39 @@ class fem_func():
         Same return contract as solve_sys: (u, D_tot).
         """
         K, D_tot = self.k_glob_vec(B, e, s, cmk, self.gauss_order)
+
+        Kcond  = self.m_stat_con(K, cDOF)
+        fecond = self.v_stat_con(fe, cDOF, cVAL)
+
+        start = time.time()
+        lu, piv = lu_factor(Kcond)
+        u = lu_solve((lu, piv), fecond)
+        end = time.time()
+        time_Kinv._updatetime(delta_t=end - start)
+
+        return u, D_tot
+
+
+    def solve_sys_nn_num_vec(self, B, fe, cDOF, cVAL, cmk, eh, sh, e, s, model_dim, scenario,
+                             loaded_models=None):
+        """
+        Vectorised drop-in for solve_sys_nn_num. Routes the stiffness assembly through
+        k_glob_nn_num_vec instead of k_glob_nn_num.
+
+        Restrictions (inherited from k_k_nn_num_vec):
+            * model_dim == 'THREEDIM' only.
+            * cm == 3 only.
+
+        Args:
+            loaded_models (dict|None): dict of preloaded NN models from load_NN_model
+                (key 'D' for the THREEDIM tangent predictor). If None, the model is loaded
+                from disk on every prediction call (slow path).
+
+        Same return contract as solve_sys_nn_num: (u, D_tot).
+        """
+        K, D_tot = self.k_glob_nn_num_vec(B, e, s, eh, sh, cmk, self.gauss_order,
+                                          model_dim, scenario,
+                                          loaded_models=loaded_models)
 
         Kcond  = self.m_stat_con(K, cDOF)
         fecond = self.v_stat_con(fe, cDOF, cVAL)

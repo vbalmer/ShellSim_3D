@@ -7,6 +7,7 @@ import time
 
 import numpy as np
 import pandas as pd
+import pickle
 import wandb
 
 from dict_CC import dict_CC
@@ -223,7 +224,7 @@ class single_deploy_utils():
 
         return model_path
     
-    def save_data(self, mat_res, NN_hybrid):
+    def save_data(self, NN_hybrid, mat_res):
         # save the data: 
         if NN_hybrid['predict_sig'] and NN_hybrid['predict_D']: 
             fname = 'mat_res_NN.pkl'
@@ -238,8 +239,11 @@ class single_deploy_utils():
         else: 
             fname = 'mat_res_norm.pkl'
 
-        mat_res_pd_NN = pd.DataFrame.from_dict(mat_res)
-        mat_res_pd_NN.to_pickle(os.path.join('05_Deploying\\data_out',fname))
+        # mat_res values include multi-dim arrays (eh_cum, sh_cum, De_cum, ...) which can't be
+        # broadcast into a DataFrame column-wise. Pickle the dict directly, matching what
+        # Main_vb_vec.py (and Main_vb.py post-refactor) already does.
+        with open(os.path.join('deploying\\data_out', fname), 'wb') as f:
+            pickle.dump(mat_res, f)
 
         return
 

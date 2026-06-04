@@ -36,7 +36,7 @@ inp_run = {
     "mat_tot_dict": mat_tot_dict,
     "model_no": [35],                                           # epoch number of NN model to use (int)
     "numit": 9,
-    "predict": [False, False]                                     # [predict_sig, predict_D]
+    "predict": [True, True]                                     # [predict_sig, predict_D]
 }
 
 CONTINUE = True                                                 # if CONTINUE = True: continues iteration from previous load level, 

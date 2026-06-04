@@ -95,6 +95,8 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
             pass
             # this plot does not make any sense because the D matrix is not predicted by epsilon in this 0-th iteration
     
+    np.save('sh_linel.npy', sh)
+
     # -------------------------------------------------------------------------------------------------------------------- #
     # 3 Nonlinear Solution: Iteration with Tangent Stiffness
     # -------------------------------------------------------------------------------------------------------------------- #

@@ -7,6 +7,7 @@ import time
 from Mesh_gmsh_vb import input_definition
 from fem_vb import fem_func
 from main_utils_vb import *
+from deployment_prediction import load_NN_model
 
 def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_folder_path = None):
     '''
@@ -37,6 +38,18 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
     MATK, NODESG, ELS, COORD, GEOMA, GEOMK, MASK, na, BC, gauss_order, it_type, Load_el, Load_n, copln = input_definition(mat, NN_hybrid)
     fem_func0 = fem_func(MATK, NODESG, ELS, COORD, GEOMA, GEOMK, MASK, na, BC, gauss_order, it_type, Load_el, Load_n, copln, model_path)
     fem_func1 = fem_func(MATK, NODESG, ELS, COORD, GEOMA, GEOMK, MASK, na, BC, gauss_order, it_type, Load_el, Load_n, copln, model_path)
+
+    # Preload NN models once (outside the Newton-Raphson loops) -- avoids re-loading from
+    # disk on every prediction call. Pass `loaded_models=loaded_models` to find_sh_nn_vec /
+    # solve_sys_nn_num_vec below. Only loaded when NN is actually used.
+    if NN_hybrid['predict_sig'] or NN_hybrid['predict_D']:
+        loaded_models = {
+            key: load_NN_model(model_path['model'][key])
+            for key in ('sig_I', 'sig_II', 'sig_III', 'D')
+            if key in model_path.get('model', {})
+        }
+    else:
+        loaded_models = None
 
     # -------------------------------------------------------------------------------------------------------------------- #
     # 2 Initiation of Iteration
@@ -73,7 +86,7 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
     "               - eold, unold, thnold: Initiations as i-1-Iteration Step values"
     "               - Initiation of r (residual vector): size of u"
     
-    e, eold, eh, eh_, s, s_prev, sh, sh_, r, u, u_, unold, thnold, De_tot, De_tot_ = linear_elastic_solution(fem_func0, fem_func1, B, fe, f0, e0, cDOF, cVAL, NN_hybrid, gauss_order)
+    e, eold, eh, eh_, s, s_prev, sh, sh_, r, u, u_, unold, thnold, De_tot, De_tot_ = linear_elastic_solution(fem_func0, fem_func1, B, fe, f0, e0, cDOF, cVAL, NN_hybrid, gauss_order, loaded_models=loaded_models)
 
     # 3.1 Number of Iteration Steps
     " 3.1 Output:   - numit: Number of iteration steps"
@@ -93,6 +106,7 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
             pass
             # this plot does not make any sense because the D matrix is not predicted by epsilon in this 0-th iteration
 
+    np.save('sh_linel_vec.npy', sh)
 
      # -------------------------------------------------------------------------------------------------------------------- #
     # 3 Nonlinear Solution: Iteration with Tangent Stiffness
@@ -153,9 +167,9 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
                         u -= du
                     else:
                         # in the case of ONEDIM_x, ONEDIM_y, TWODIM or THREEDIM
-                        du, De_tot=fem_func0.solve_sys_nn_num(B,fi-fe, cDOF,np.zeros_like(cVAL), MATK["cm"],eh,sh, e, s, NN_hybrid['model_dim'], scenario = mat["s"])
+                        du, De_tot=fem_func0.solve_sys_nn_num_vec(B,fi-fe, cDOF,np.zeros_like(cVAL), MATK["cm"],eh,sh, e, s, NN_hybrid['model_dim'], scenario = mat["s"], loaded_models=loaded_models)
                         u -= du
-                    du_, De_tot_=fem_func1.solve_sys(B,fi-fe, cDOF,np.zeros_like(cVAL), MATK["cm"],e,s)
+                    du_, De_tot_=fem_func1.solve_sys_vec(B,fi-fe, cDOF,np.zeros_like(cVAL), MATK["cm"],e,s)
                     u_ -= du_
                 elif (NN_hybrid['PERM'] is not None):
                     if NN_hybrid['predict_D'] or NN_hybrid['predict_sig']:
@@ -174,7 +188,7 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
 
                 if NN_hybrid['predict_sig']:
                     eh = fem_func0.find_eh_vec(B,u, gauss_order)
-                    sh = fem_func0.find_sh_nn_vec(eh, gauss_order, NN_hybrid['model_dim'])
+                    sh = fem_func0.find_sh_nn_vec(eh, gauss_order, NN_hybrid['model_dim'], loaded_models=loaded_models)
                     # Calculate the "real" strains and stresses for the D calculation (or just for checking)
                     eh_ = fem_func1.find_eh_vec(B,u, gauss_order)
                     [e, ex, ey, gxy, e1, e3, th] = fem_func1.find_e(e0, eh_, gauss_order)
@@ -325,7 +339,7 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
                     print(f'Stopped iteration after {i} steps, because the results already converged.')
                     mat_res = save_data_inter_loop(NN_hybrid, eold, fem_func0, B, u, gauss_order, e0c, sh0, s_prev, MATK, COORD, GEOMK, ELS, GEOMA, BC, MASK, NODESG,
                                                     e0, e, s, fi, fe, f0, cDOF, start_main, mat_convergence_un_thn_nl, na, mat,
-                                                    De_tot, u_cum, u_cum_, sh_cum, sh_cum_, eh_cum, eh_cum_, De_cum, De_cum_)
+                                                    De_tot, u_cum, u_cum_, sh_cum, sh_cum_, eh_cum, eh_cum_, De_cum, De_cum_, loaded_models)
                     if isinstance(mat['F'], np.ndarray):
                         if len(mat['F'])>1:
                             save_deployment_loadpath(new_folder_path, int(mat["F"][j]/mat["L"]), NN_hybrid, conv_plt)
@@ -336,13 +350,13 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
                     print(f'Stopped iteration after {i} steps, because maximum iteration steps were reached. Solution did not converge for this load step.')
                     mat_res = save_data_inter_loop(NN_hybrid, eold, fem_func0, B, u, gauss_order, e0c, sh0, s_prev, MATK, COORD, GEOMK, ELS, GEOMA, BC, MASK, NODESG,
                                                     e0, e, s, fi, fe, f0, cDOF, start_main, mat_convergence_un_thn_nl, na, mat,
-                                                    De_tot, u_cum, u_cum_, sh_cum, sh_cum_, eh_cum, eh_cum_, De_cum, De_cum_)
+                                                    De_tot, u_cum, u_cum_, sh_cum, sh_cum_, eh_cum, eh_cum_, De_cum, De_cum_, loaded_models)
                     if isinstance(mat['F'], np.ndarray):
                         if len(mat['F'])>1:
                             save_deployment_loadpath(new_folder_path, int(mat["F"][j]/mat["L"]), NN_hybrid, conv_plt) 
                         if j < len(mat['F']):
                             print('Redoing lin.el. calculation to start next load step afresh.')
-                            e, eold, eh, eh_, s, s_prev, sh, sh_, r, u, u_, unold, thnold, De_tot, De_tot_ = linear_elastic_solution(fem_func0, fem_func1, B, fe, f0, e0, cDOF, cVAL, NN_hybrid, gauss_order)         
+                            e, eold, eh, eh_, s, s_prev, sh, sh_, r, u, u_, unold, thnold, De_tot, De_tot_ = linear_elastic_solution(fem_func0, fem_func1, B, fe, f0, e0, cDOF, cVAL, NN_hybrid, gauss_order, loaded_models=loaded_models)
 
                 t1 =(time.perf_counter()-start_time_iteration)
                 print(f'Time required for one iteration step: {t1/60:.2f} min.')
@@ -376,7 +390,7 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
 
 
 
-def linear_elastic_solution(fem_func0, fem_func1, B, fe, f0, e0, cDOF, cVAL, NN_hybrid, gauss_order):
+def linear_elastic_solution(fem_func0, fem_func1, B, fe, f0, e0, cDOF, cVAL, NN_hybrid, gauss_order, loaded_models=None):
     print("2.2 Solution for Linear Elasticity")
 
     # The first (initialising) solve should always be carried out based on the linear elastic stiffness.
@@ -390,7 +404,7 @@ def linear_elastic_solution(fem_func0, fem_func1, B, fe, f0, e0, cDOF, cVAL, NN_
     if NN_hybrid['predict_sig']:
         # if we use sigma from the NN we need to calculate sh with the NN
         eh = fem_func0.find_eh_vec(B,u,gauss_order)
-        sh = fem_func0.find_sh_nn_vec(eh, gauss_order, NN_hybrid['model_dim'])
+        sh = fem_func0.find_sh_nn_vec(eh, gauss_order, NN_hybrid['model_dim'], loaded_models=loaded_models)
         print('Gauss order for NN-run is: ', gauss_order)
         eold = eh
         r = u
@@ -431,7 +445,7 @@ def linear_elastic_solution(fem_func0, fem_func1, B, fe, f0, e0, cDOF, cVAL, NN_
 
 def save_data_inter_loop(NN_hybrid, eold, fem_func0, B, u, gauss_order, e0c, sh0, s_prev, MATK, COORD, GEOMK, ELS, GEOMA, BC, MASK, NODESG,
                          e0, e, s, fi, fe, f0, cDOF, start_main, mat_convergence_un_thn_nl, na, mat,
-                         De_tot, u_cum, u_cum_, sh_cum, sh_cum_, eh_cum, eh_cum_, De_cum, De_cum_):
+                         De_tot, u_cum, u_cum_, sh_cum, sh_cum_, eh_cum, eh_cum_, De_cum, De_cum_, loaded_models):
 
 
     # 3.3 Collect Values for Convergence
@@ -463,12 +477,12 @@ def save_data_inter_loop(NN_hybrid, eold, fem_func0, B, u, gauss_order, e0c, sh0
     # print('eh2', eh[:,0,0,0])
 
     Bc = fem_func0.find_b(1)
-    ehc = fem_func0.find_eh(Bc,u,1)
+    ehc = fem_func0.find_eh_vec(Bc,u,1)
     # print('ehc', ehc[:,0,0,4])
 
 
     if NN_hybrid['predict_sig']:
-        sh = fem_func0.find_sh_nn(eh,1, NN_hybrid['model_dim'])+sh0
+        sh = fem_func0.find_sh_nn_vec(ehc,1, NN_hybrid['model_dim'], loaded_models=loaded_models)+sh0
     else: 
         ec = fem_func0.find_e(e0c,ehc,1)[0]
         sc = fem_func0.find_s(ec,s_prev,1)
