@@ -6,8 +6,8 @@ from single_element_utils import *
 # geom = [300, 0.025, 0.025, 1]
 geom = []
 model_path = 'training\\logs'
-model_version = 33
-model_version_comp = 35
+model_version = 35
+model_version_comp = 36
 
 save_path = 'training\\plots_single_el'
 

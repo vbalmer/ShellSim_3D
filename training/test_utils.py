@@ -274,17 +274,22 @@ def get_unnormalised_data(pred_norm: torch.Tensor, stats: dict, sobolev: bool) -
     return pred
 
 
-def predict_D(test_model: FFNN, inp: dict, test_data: dict, stats: dict, sobolev:bool):
+def predict_D(test_model: FFNN, inp: dict, test_data: dict, stats: dict, sobolev:bool, non_batchwise:bool=False):
     """
     Predict values of stiffness based on trained model.
 
     Args:
-        test_model  (FFNN): Trained model 
-        inp         (dict): Hyperparameters
-        test_data   (dict): Features for test data
-        stats       (dict): Statistical values of training data set
-        sobolev     (bool): True, if test_model was trained including sobolev losses.
-    Returns: 
+        test_model     (FFNN): Trained model
+        inp            (dict): Hyperparameters
+        test_data      (dict): Features for test data
+        stats          (dict): Statistical values of training data set
+        sobolev        (bool): True, if test_model was trained including sobolev losses.
+        non_batchwise  (bool): If True, compute the jacobian on the full input in a single
+                               pass (skipping the DataLoader iteration). Intended for FEM
+                               deployment use (fem_vb.py), where each call is small and the
+                               batching overhead isn't useful. Default False keeps the
+                               existing batchwise behaviour for test-data evaluation.
+    Returns:
         plot_data   (dict): Containing normalised and original-unit predictions and labels. Shape: ((ntest, 6, 6))
     """
 
@@ -297,7 +302,7 @@ def predict_D(test_model: FFNN, inp: dict, test_data: dict, stats: dict, sobolev
     test_data_norm_torch = data_to_torch(test_data_norm)
 
     # 2 - make prediction in normalised coordinates
-    pred_norm = get_normalised_D_pred(inp, test_data_norm_torch, test_model)
+    pred_norm = get_normalised_D_pred(inp, test_data_norm_torch, test_model, non_batchwise=non_batchwise)
 
     # 3 - make predictions in [N,mm] by reverting normalisation
     pred_ext = np.concatenate((np.zeros((pred_norm.shape[0], 6)), pred_norm.reshape((-1, 36))), axis=1)     # for the function below to work correctly need given shape.
@@ -314,35 +319,45 @@ def predict_D(test_model: FFNN, inp: dict, test_data: dict, stats: dict, sobolev
 
     return plot_data
 
-def get_normalised_D_pred(inp:dict, data: dict, test_model: FFNN, batch_size_fallback = 265, fallback = False):
+def get_normalised_D_pred(inp:dict, data: dict, test_model: FFNN, batch_size_fallback = 265, fallback = False, non_batchwise:bool=False):
     """
     Get normalised predictions for stiffness (from actual call to FFNN).
 
-    Args: 
-        inp         (dict): Required for batchsize
-        data        (dict): test data in normalised, torch version (X_test_tt, y_test_tt)
-        test_model  (FFNN): trained model in eval mode.
-        test_batch_size(int): safeguard batch size in case standard batch size is too large.
-        fallback    (bool): auxiliary variable for recursive function
-        batchwise   (bool): if false: doesn't carry out predictions batchwise.
+    Args:
+        inp            (dict): Required for batchsize
+        data           (dict): test data in normalised, torch version (X_test_tt, y_test_tt)
+        test_model     (FFNN): trained model in eval mode.
+        test_batch_size(int):  safeguard batch size in case standard batch size is too large.
+        fallback       (bool): auxiliary variable for recursive function.
+        non_batchwise  (bool): if True, skip the DataLoader iteration and compute the
+                               jacobian on the full input in a single pass. Intended for
+                               FEM deployment (fem_vb.py); for test-data evaluation keep
+                               the default False (batchwise via DataLoader).
 
-    Returns: 
+    Returns:
         pred_norm   (torch.Tensor): Normalised predictions for test dataset.
     """
 
+    model_cpu = test_model.to(torch.device('cpu'))
+
+    if non_batchwise:
+        # Single-pass jacobian on the full input. No DataLoader, no batch loop.
+        X = data['X_test_tt'].to(torch.device('cpu'))
+        J = vmap(torch.func.jacrev(model_cpu.forward), randomness='different')(X)
+        return J.detach().numpy()
+
     if inp['batch_size'] is None:
         batch_size_test = data['X_test_tt'].shape[0]
-    else: 
+    else:
         batch_size_test = inp['batch_size']
-        
+
     test_dataset = TensorDataset(data['X_test_tt'].to(device))
     test_loader = DataLoader(test_dataset, batch_size = batch_size_test, shuffle = False)
     if fallback:
         test_loader = DataLoader(test_loader.dataset, batch_size=batch_size_fallback)
-    
+
 
     jacobian = []
-    model_cpu = test_model.to(torch.device('cpu'))
     for batch_no, (X_test_tt,) in enumerate(test_loader):
         X_test_tt = X_test_tt.cpu()
         try:
