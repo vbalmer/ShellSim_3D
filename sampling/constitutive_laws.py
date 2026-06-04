@@ -87,10 +87,13 @@ class ConstitutiveLaws():
         denom = 2 * (e1 - ex)
         th = np.arctan(np.where(np.abs(denom) > 1e-10, gxy / denom, 0.0))
 
-        # Override where e1 ≈ ex (degenerate cases)
+        # Override where e1 ≈ ex or e1 ≈ ey (axis-aligned frame); near_ey added for x/y symmetry.
         near_ex = np.abs(e1 - ex) < 1e-10
+        near_ey = np.abs(e1 - ey) < 1e-10
         th = np.where(near_ex & (ex > ey),  np.pi/2 - 1e-10, th)
         th = np.where(near_ex & (ex < ey),  1e-10,            th)
+        th = np.where(near_ey & (ey > ex),  1e-10,            th)
+        th = np.where(near_ey & (ey < ex),  np.pi/2 - 1e-10, th)
         th = np.where(near_ex & (ex == ey), np.pi/4,          th)
 
         # 3 Submodel
@@ -505,7 +508,7 @@ class ConstitutiveLaws():
         mask_1_y = mask & mask_rhoy & mask_e_y
         ssy[mask_1_y] = self.ssr(self.e[:,:,1:2][mask_1_y], ecy[mask_1_y], self.ecsy, 
                                 sry[mask_1_y], self.rho_y[mask_1_y])
-        mask_2_y = mask & mask_rhoy & ~mask_e
+        mask_2_y = mask & mask_rhoy & ~mask_e_y
         ssy[mask_2_y] = self.ss_bilin(self.e[:,:,1:2][mask_2_y])
 
         # 3 CFRP Contribution (skipped)

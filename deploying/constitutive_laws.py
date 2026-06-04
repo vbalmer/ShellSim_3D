@@ -87,10 +87,13 @@ class ConstitutiveLaws():
         denom = 2 * (e1 - ex)
         th = np.arctan(np.where(np.abs(denom) > 1e-10, gxy / denom, 0.0))
 
-        # Override where e1 ≈ ex (degenerate cases)
+        # Override where e1 ≈ ex or e1 ≈ ey (axis-aligned frame); near_ey added for x/y symmetry.
         near_ex = np.abs(e1 - ex) < 1e-10
+        near_ey = np.abs(e1 - ey) < 1e-10
         th = np.where(near_ex & (ex > ey),  np.pi/2 - 1e-10, th)
         th = np.where(near_ex & (ex < ey),  1e-10,            th)
+        th = np.where(near_ey & (ey > ex),  1e-10,            th)
+        th = np.where(near_ey & (ey < ex),  np.pi/2 - 1e-10, th)
         th = np.where(near_ex & (ex == ey), np.pi/4,          th)
 
         # 3 Submodel
@@ -448,11 +451,11 @@ class ConstitutiveLaws():
         _,_,th,_,_,_,ec1,ec3 = self.principal(e[:,:,0:1], e[:,:,1:2], e[:,:,2:3]) 
         
         # 2 Steel Contribution
-        ssx = np.zeros((e.shape[0], e.shape[1],1), dtype = np.complex64)
+        ssx = np.zeros((e.shape[0], e.shape[1],1), dtype = np.complex128)
         mask_rhox = (self.rho_x != 0)
         ssx[mask&mask_rhox] = self.ss_bilin(e[:,:,0:1][mask&mask_rhox])
 
-        ssy = np.zeros((e.shape[0], e.shape[1],1), dtype = np.complex64)
+        ssy = np.zeros((e.shape[0], e.shape[1],1), dtype = np.complex128)
         mask_rhoy = (self.rho_y != 0)
         ssy[mask&mask_rhoy] = self.ss_bilin(e[:,:,1:2][mask&mask_rhoy])
 
@@ -490,7 +493,7 @@ class ConstitutiveLaws():
         srx, sry = self.sr0_vc(th)
 
         # 2 Steel Contribution
-        ssx = np.zeros((e.shape[0], e.shape[1],1), dtype = np.complex64)
+        ssx = np.zeros((e.shape[0], e.shape[1],1), dtype = np.complex128)
         mask_rhox = (self.rho_x != 0)
         mask_e = e[:,:,0:1] > ecx
         mask_1_x = mask & mask_rhox & mask_e
@@ -499,13 +502,13 @@ class ConstitutiveLaws():
         mask_2_x = mask & mask_rhox & ~mask_e
         ssx[mask_2_x] = self.ss_bilin(self.e[:,:,0:1][mask_2_x])
 
-        ssy = np.zeros((e.shape[0], e.shape[1],1), dtype=np.complex64)
+        ssy = np.zeros((e.shape[0], e.shape[1],1), dtype=np.complex128)
         mask_rhoy = (self.rho_y != 0)
         mask_e_y = e[:,:,1:2] > ecy
         mask_1_y = mask & mask_rhoy & mask_e_y
         ssy[mask_1_y] = self.ssr(self.e[:,:,1:2][mask_1_y], ecy[mask_1_y], self.ecsy, 
                                 sry[mask_1_y], self.rho_y[mask_1_y])
-        mask_2_y = mask & mask_rhoy & ~mask_e
+        mask_2_y = mask & mask_rhoy & ~mask_e_y
         ssy[mask_2_y] = self.ss_bilin(self.e[:,:,1:2][mask_2_y])
 
         # 3 CFRP Contribution (skipped)
@@ -545,12 +548,12 @@ class ConstitutiveLaws():
         srx, sry = self.sr0_vc(th)
 
         # 2 Steel contribution
-        ssx = np.zeros((e.shape[0], e.shape[1],1), dtype = np.complex64)
+        ssx = np.zeros((e.shape[0], e.shape[1],1), dtype = np.complex128)
         mask_rhox = (self.rho_x != 0)
         ssx[mask&mask_rhox] = self.ssr(self.e[:,:,0:1][mask&mask_rhox], ecx[mask&mask_rhox], self.ecsx, 
                                        srx[mask&mask_rhox], self.rho_x[mask&mask_rhox])
 
-        ssy = np.zeros((self.e.shape[0], self.e.shape[1],1), dtype = np.complex64)
+        ssy = np.zeros((self.e.shape[0], self.e.shape[1],1), dtype = np.complex128)
         mask_rhoy = (self.rho_y != 0)
         ssy[mask&mask_rhoy] = self.ssr(self.e[:,:,1:2][mask&mask_rhoy], ecy[mask&mask_rhoy], self.ecsy, 
                                        sry[mask&mask_rhoy], self.rho_y[mask&mask_rhoy])
@@ -636,9 +639,9 @@ class ConstitutiveLaws():
             mask1 = (submodel == 1)
             mask2 = ~mask3 & ~mask1
 
-            sx  = np.zeros((n_tot, self.nl, 1), dtype = np.complex64)
-            sy  = np.zeros((n_tot, self.nl, 1), dtype = np.complex64)
-            txy = np.zeros((n_tot, self.nl, 1), dtype = np.complex64)
+            sx  = np.zeros((n_tot, self.nl, 1), dtype = np.complex128)
+            sy  = np.zeros((n_tot, self.nl, 1), dtype = np.complex128)
+            txy = np.zeros((n_tot, self.nl, 1), dtype = np.complex128)
 
             sx[mask3], sy[mask3], txy[mask3] = self.sigma_cart_33(mask3)
             sx[mask1], sy[mask1], txy[mask1] = self.sigma_cart_31(mask1)
