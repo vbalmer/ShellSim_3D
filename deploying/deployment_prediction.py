@@ -10,41 +10,78 @@ from training.test_utils import predict_D, predict_sig, get_inp_from_folder, tes
 from training.single_element_utils import get_stats_from_folder
 
 
-def make_NN_prediction(input_j:np.array, predict:str, model_path: str):
+def load_NN_model(model_path):
     """
-    Make prediction for deployment with NN. Ammends the input_j with y_test dummy variable and returns desired prediction. 
+    Load a single NN model from disk. Call this ONCE at startup. Avoids re-loading the model from disk on every
+    prediction call.
+
+    Args:
+        model_path  ([str, int])    [model_dir, model_version], e.g. ['training\\logs', 33].
+
+    Returns:
+        (inp, test_model, stats)    Tuple ready to be passed to make_NN_prediction.
+    """
+    inp        = get_inp_from_folder(model_path[0], model_path[1])
+    test_model = test_model_instance(inp, model_path[0], model_path[1])
+    stats      = get_stats_from_folder(model_path[0], model_path[1])
+    return inp, test_model, stats
+
+
+def _resolve_NN_model(model_or_path):
+    """Accept either a preloaded (inp, test_model, stats) triple or a model_path and
+    return the triple. If given a path, the model is loaded on the spot (slow path,
+    kept for backward compatibility with callers that still pass paths)."""
+    if isinstance(model_or_path, tuple) and len(model_or_path) == 3:
+        return model_or_path
+    return load_NN_model(model_or_path)
+
+
+def make_NN_prediction(input_j:np.array, predict:str, model=None, model_path=None, non_batchwise:bool=False):
+    """
+    Make prediction for deployment with NN. Ammends the input_j with y_test dummy variable and returns desired prediction.
     Relies on same functions as testing /single-element-testing of NN.
 
     Args:
-        input_j     (np.arr)
-        predict     (str)           either sig or D (depending on what you want to predict). Function is not made to predict both at once but could be ammended for that.
-        model_path  ([str, int])    as in the definition in single_element_test ([model_path, model_version], e.g. ['training\\logs', 33])
+        input_j        (np.arr)
+        predict        (str)           either sig or D (depending on what you want to predict). Function is not made to predict both at once but could be ammended for that.
+        model          Either a preloaded (inp, test_model, stats) triple from load_NN_model
+                       (preferred -- avoids reloading from disk), or a model_path
+                       ([str, int], e.g. ['training\\logs', 33]) which is loaded on the spot.
+        model_path     Backward-compat alias for `model` -- accepts a model_path only.
+                       Existing callers in the non-vec pipeline still pass `model_path=...`.
+        non_batchwise  (bool): forwarded to predict_D only. If True, the jacobian
+                       computation skips the DataLoader iteration and runs on the full
+                       input in one pass. Set True from fem_vb.py callers; default False
+                       keeps the batchwise behaviour for test-data evaluation.
 
-    Returns: 
+    Returns:
         sig_D_NN    (dict)          dict containing sig or De as array, where always one of the two is "None".
     """
-    
+
+    if model is None:
+        if model_path is None:
+            raise TypeError("make_NN_prediction: pass either `model` (preferred) or `model_path`.")
+        model = model_path
+
     prediction_data = {
             'X_test': input_j,
             'y_test': np.zeros_like(input_j)        # dummy variable (empty).
         }
 
 
-    inp = get_inp_from_folder(model_path[0], model_path[1])
-    test_model = test_model_instance(inp, model_path[0], model_path[1])
-    stats = get_stats_from_folder(model_path[0], model_path[1])
+    inp, test_model, stats = _resolve_NN_model(model)
 
     if predict == 'sig':
         sig_NN = predict_sig(test_model, inp, prediction_data, stats, sobolev = inp['Sobolev'])
         De_NN = {'pred': None}
     elif predict == 'D':
         sig_NN = {'pred': None}
-        De_NN = predict_D(test_model, inp, prediction_data, stats, sobolev = inp['Sobolev'])
+        De_NN = predict_D(test_model, inp, prediction_data, stats, sobolev = inp['Sobolev'], non_batchwise=non_batchwise)
 
     sig_D_NN = {
                 'sig': sig_NN['pred'],
                 'D': De_NN['pred'],
-            }     
+            }
 
     return sig_D_NN
 
