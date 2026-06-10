@@ -6,5 +6,6 @@
 *.pdf
 *.json
 *.pyc
+*.txt
 
 wandb

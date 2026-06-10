@@ -466,7 +466,8 @@ def input_definition(mat, NN_hybrid):
         fsu = 500
         Es = 205e3
         Esh = 8e3
-        rho = 0.01
+        rho_x = 0.01
+        rho_y = 0.01
         D = 16
 
     # -------------------------------------------------------------------------------------------------------------------- #
@@ -1640,6 +1641,85 @@ def input_definition(mat, NN_hybrid):
                         ])
 
         Load_n  = np.array([[0,L,0,B,0,0,3,0]])
+
+
+
+
+    elif scenario == 201: 
+        # pure bending in y-direction
+
+        " 2.1 Output:    - Global Boundary Conditions "
+        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
+        "                   BC_i in unit length (mm), 1234 if DOF is free"
+
+        
+        f = 1
+        BC = np.array(([
+                        [-f, f, -f, f, -f, f, 1234, 0,0,1234,1234,1234],
+                        [L-f, L+f, -f, f, -f, f, 1234, 0,1234,1234,1234,1234],
+                        [L-f, L+f, B-f, B+f, -f, f, 0, 1234,0,1234,1234,1234],
+                        [-f, f, B-f, B+f, -f, f, 1234, 1234,0,1234,1234,1234],
+                        ]))
+        
+        # BC = np.array(([
+        #                 [-f, L+f, -f, f, -f, f, 1234, 1234,0,1234,1234,1234],  # lower edge (nur z)
+        #                 [-f, L+f, B-f, B+f, -f, f, 1234, 1234,0,1234,1234,1234],  # upper edge (nur z)
+        #                 [L-f, L+f, B-f, B+f, -f, f, 0, 1234,0,1234,1234,1234],   # upper right corner
+        #                 [L-f, L+f, 0-f, 0+f, -f, f, 1234, 0,0,1234,1234,1234],   # lower right corner
+        #                 [0-f, 0+f, 0-f, 0+f, -f, f, 1234, 0,0,1234,1234,1234],   # lower left corner
+        #                 ]))
+
+
+        # BC = np.array(([
+        #                 [L/2-f, L/2+f, B/2-f, B/2+f, -f, f, 0,0,0,0,0,0],
+        #                 ]))
+
+        
+        " 2.2 Output:   - Load_el: Global Element Loads "
+        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
+        "               - Load_n: Global Nodal Loads"
+        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
+
+
+        if isinstance(Force_mag, np.ndarray): 
+            nls = len(Force_mag)
+            Load_el = [[]]*nls
+            Load_n = [[]]*nls
+        else: 
+            nls = 1
+            Force_mag = [Force_mag]
+            Load_el = [[]]*nls
+            Load_n = [[]]*nls
+
+        for i in range(nls):
+            # no element loads (magnitude = 0)
+            Load_el[i] = np.array([
+                            [0,L,0,B,0,0,3,0],
+                            ])
+            
+            # nodal loads
+            Load_n[i]  = np.array([
+                            # minor negative bending in y-direction
+                            # [0,0,0+ms/2,L-ms/2,0,0,5,180e3*(ms/L)],
+                            # [B,B,0+ms/2,L-ms/2,0,0,5,-180e3*(ms/L)],
+
+                            # [0,0,0,0,0,0,5,180e3/2*(ms/L)],
+                            # [0,0,L,L,0,0,5,-180e3/2*(ms/L)],
+                            # [B,B,0,0,0,0,5,180e3/2*(ms/L)],
+                            # [B,B,L,L,0,0,5,-180e3/2*(ms/L)],
+
+
+                            # bending in x-direction
+                            [0+ms/2,B-ms/2,0,0,0,0,4,-Force_mag[i]*(ms/L)],
+                            [0+ms/2,B-ms/2,L,L,0,0,4,Force_mag[i]*(ms/L)],
+
+                            [0,0,0,0,0,0,4,-Force_mag[i]/2*(ms/L)],   # (0,0)  y=0  -> -F/2
+                            [0,0,L,L,0,0,4,Force_mag[i]/2*(ms/L)],    # (0,L)  y=L  -> +F/2
+                            [B,B,0,0,0,0,4,-Force_mag[i]/2*(ms/L)],   # (B,0)  y=0  -> -F/2
+                            [B,B,L,L,0,0,4,Force_mag[i]/2*(ms/L)],    # (B,L)  y=L  -> +F/2
+
+
+                            ])
         
 
 

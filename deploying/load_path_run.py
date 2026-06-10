@@ -20,7 +20,7 @@ mat_tot_dict = {                        # no force definition here, as this chan
     'E_1': np.array([0]),
     'E_2': np.array([0]),
     'ms': np.array([600]),
-    's': np.array([9]),
+    's': np.array([201]),
     't_1': np.array([300]),
     't_2': np.array([0]),
     'nl': np.array([20]),
@@ -34,7 +34,7 @@ mat_tot_dict = {                        # no force definition here, as this chan
 
 inp_run = {
     "mat_tot_dict": mat_tot_dict,
-    "model_no": [35],                                           # epoch number of NN model to use (int)
+    "model_no": [37],                                           # epoch number of NN model to use (int)
     "numit": 9,
     "predict": [True, True]                                     # [predict_sig, predict_D]
 }
@@ -43,14 +43,17 @@ CONTINUE = True                                                 # if CONTINUE = 
                                                                 # does not start every load level from linear elastic
                                                                 # if only calculating one load level, please use Continue = False
 
-os.environ["WANDB_MODE"] = "disabled"
+os.environ["WANDB_MODE"] = "online"
 
 
 # rho_y = 1%
-load_levels = [600]
+# load_levels = [600]
 # load_levels = [200, 400, 600, 800, 1000, 1100, 1200, 1300, 1350, 1375, 1400, 1410, 1420]
 # load_levels = [-2000, -4000, -6000, -8000, -9000, -10000, -10100, -10200, -10250, -10300]
 # load_levels = [200, 400, 600, 800, 900, 910, 920, 930, 940, 950]
+
+load_levels = [20e3, 40e3, 60e3, 80e3, 100e3, 120e3, 140e3, 160e3, 180e3]
+
 
 # rho_y = 1.5%
 # load_levels = [200, 600, 1000, 1200, 1400, 1600, 1650, 1700, 1710, 1720, 1730, 1740]

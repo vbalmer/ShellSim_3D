@@ -5,7 +5,7 @@
 from test_utils import *
 
 
-VERSION = 36                 
+VERSION = 37                 
 
 ############################ 5 - Test              ############################
 

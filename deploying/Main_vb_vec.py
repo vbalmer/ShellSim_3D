@@ -127,6 +127,12 @@ def main_solver(mat: dict, conv_plt: bool, NN_hybrid: dict, model_path:str, new_
         mat_convergence_un_thn = convergence_values_un_thn(u, unold = un, thnold = thn)
         mat_convergence_un_thn_nl = convergence_values_un_thn(u, unold, thnold)
 
+        # Linear elastic (mat == 1): no Newton-Raphson iteration runs, so build mat_res directly here.
+        if MATK['cm'][0] == 1:
+            mat_res = save_data_inter_loop(NN_hybrid, eold, fem_func0, B, u, gauss_order, e0c, sh0, s_prev, MATK, COORD, GEOMK, ELS, GEOMA, BC, MASK, NODESG,
+                                            e0, e, s, fi, fe, f0, cDOF, start_main, mat_convergence_un_thn_nl, na, mat,
+                                            De_tot, u_cum, u_cum_, sh_cum, sh_cum_, eh_cum, eh_cum_, De_cum, De_cum_, loaded_models)
+
     elif it_type == 2:
         raise RuntimeWarning('Secant stiffness iteration is outdated, please use it_type = 1')
     
@@ -489,6 +495,12 @@ def save_data_inter_loop(NN_hybrid, eold, fem_func0, B, u, gauss_order, e0c, sh0
         sh = fem_func0.find_sh(sc,1)+sh0
     
     if NN_hybrid['predict_sig'] or NN_hybrid['predict_D']:
+        # careful: this will yield some wrong solutions, please double-check after it runs.
+        [e, ex, ey, gxy, e1, e3, th] = [0, 0, 0, 0, 0, 0, 0]
+    else:
+        [e, ex, ey, gxy, e1, e3, th] = fem_func0.find_e(np.zeros_like(e0), eh, gauss_order)
+
+    if NN_hybrid['predict_sig'] or NN_hybrid['predict_D']:
         ssx = np.zeros_like(eh)
         ssy = np.zeros_like(eh)
         spx = np.zeros_like(eh)
@@ -505,13 +517,6 @@ def save_data_inter_loop(NN_hybrid, eold, fem_func0, B, u, gauss_order, e0c, sh0
             spx = np.zeros_like(ex)
             spy = np.zeros_like(ex)
 
-
-    if NN_hybrid['predict_sig'] or NN_hybrid['predict_D']:
-        # careful: this will yield some wrong solutions, please double-check after it runs.
-        [e, ex, ey, gxy, e1, e3, th] = [0, 0, 0, 0, 0, 0, 0]
-    else: 
-        [e, ex, ey, gxy, e1, e3, th] = fem_func0.find_e(np.zeros_like(e0), eh, gauss_order)
-    
     Nx = sh[:, :, :, 0]
     Ny = sh[:, :, :, 1]
     Nxy = sh[:, :, :, 2]

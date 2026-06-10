@@ -2521,12 +2521,13 @@ class fem_func():
                 elif dir == 6:
                     DOF = node*6+5
                 f_e[0,DOF] = f_e[0,DOF] + load_i
-            # Add bending moment for equivalent nodal force
-                fii = np.zeros(3)
-                fii[int(dir)-1]=load_i
-                moments = np.cross(diffcordsi,fii)
-                for im in range(0,3):
-                    f_e[0,int(node*6+3+im)] = moments[im]
+            # Add bending moment for equivalent nodal force (only for offset translational loads)
+                if dir in (1, 2, 3) and np.any(diffcordsi):
+                    fii = np.zeros(3)
+                    fii[int(dir)-1] = load_i
+                    moments = np.cross(diffcordsi, fii)
+                    for im in range(0, 3):
+                        f_e[0, int(node*6+3+im)] += moments[im]
         f_e = np.transpose(f_e)
         return f_e
 

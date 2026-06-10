@@ -39,8 +39,8 @@ NUMIT = 0
 COPY = True
 # GEOM = np.array([250, 0.015, 2])
 
-path = os.path.join(os.getcwd(), 'training\\logs\\v_36')        #have not tested whether this path works as intended yet.
-path_depl = 'deploying\\data_out\\data_20260603_1334_casexx\\1410'
+path = os.path.join(os.getcwd(), 'training\\logs\\v_37')        #have not tested whether this path works as intended yet.
+path_depl = 'deploying\\data_out\\data_20260610_1805_casexx\\160000'
 save_path = 'deploying\\plots\\deployment_visualisation'
 
 
@@ -380,8 +380,8 @@ if SIG_PLOTS:
                 # main_plt_comp(mat_res_raw0_, mat_res_raw0_NN_, 'sig', save_path, type_err = 'nrse', 
                 #               stats = mat_data_stats, comp_list = comp_list_p, paper=True)
 
-                comp_list_sig = ['Nx']                        # comp_list_sig = ['Ny', 'My',  'Qy']
-                comp_list_eps = ['epsx']                      # comp_list_eps = ['epsy',  'chiy', 'gamy']
+                comp_list_sig = ['My']                        # comp_list_sig = ['Ny', 'My',  'Qy']
+                comp_list_eps = ['chiy']                      # comp_list_eps = ['epsy',  'chiy', 'gamy']
                 comp_list_u = ['ux', 'uy', 'uz']
                 main_plt_comp(mat_res_raw0_, mat_res_raw0_NN_, 'sig', save_path, type_err = 'rrse', 
                               stats = mat_data_stats, comp_list = comp_list_sig)               
@@ -498,8 +498,8 @@ if LOAD_PATH:
         # plot_load_path_wrapper(path_depl, case_study = '2D-1C', until_load_level = [1,18], 
         #                        save_path = save_path, type = 'eps', thresh = 5)
         
-        plot_load_path_wrapper('deploying\\data_out\\data_20260603_1334_casexx', case_study = '2D-4', until_load_level = [0,12], 
-                               save_path = save_path, type = 'u', thresh = 10)
+        plot_load_path_wrapper('deploying\\data_out\\data_20260610_1805_casexx', case_study = '2D-4', until_load_level = [0,9], 
+                               save_path = save_path, type = 'eps', thresh = 10)
 
         
         # plot_load_path_wrapper('05_Deploying\\data_out\\data_20260116_1510_casexx', case_study = '2D-3', until_load_level = [0,9], 
