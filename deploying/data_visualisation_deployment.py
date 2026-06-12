@@ -19,9 +19,9 @@ PERM1 = False
 
 INP_PLOTS = False
 D_PLOTS = False
-SIG_PLOTS = True
+SIG_PLOTS = False
 U_PLOTS = False
-LOAD_PATH = False
+LOAD_PATH = True
 
 
 PCA_PLOTS = False
@@ -29,7 +29,7 @@ DIAG_PLOTS = False
 SCATTER_PLOTS = False
 SCATTER_PLOTS_2D = False
 STRAIN_PLANE = False
-CONTOUR_PLOTS = True
+CONTOUR_PLOTS = False
 CONTOUR_PERIT = False
 ALLIT_PLOTS = False
 COND_PLOT = False
@@ -40,7 +40,7 @@ COPY = True
 # GEOM = np.array([250, 0.015, 2])
 
 path = os.path.join(os.getcwd(), 'training\\logs\\v_37')        #have not tested whether this path works as intended yet.
-path_depl = 'deploying\\data_out\\data_20260610_1805_casexx\\160000'
+path_depl = 'deploying\\data_out\\data_20260612_1731_casexx\\160000'
 save_path = 'deploying\\plots\\deployment_visualisation'
 
 
@@ -364,7 +364,6 @@ if SIG_PLOTS:
                         source_path_scatter = os.path.join(os.getcwd(), 'deploying\\plots\\visualisation_deployment')
                         copy_files_with_prefix(source_path_scatter, path_depl, 'scatter_matrix_inp_depl_eps-sig'+str(NUMIT))
 
-
         if CONTOUR_PLOTS:
                 with open(os.path.join(path, 'stats.pkl'),'rb') as handle:
                         mat_data_stats = pickle.load(handle)	
@@ -498,8 +497,8 @@ if LOAD_PATH:
         # plot_load_path_wrapper(path_depl, case_study = '2D-1C', until_load_level = [1,18], 
         #                        save_path = save_path, type = 'eps', thresh = 5)
         
-        plot_load_path_wrapper('deploying\\data_out\\data_20260610_1805_casexx', case_study = '2D-4', until_load_level = [0,9], 
-                               save_path = save_path, type = 'eps', thresh = 10)
+        plot_load_path_wrapper('deploying\\data_out\\data_20260612_1631_casexx', case_study = '2D-4', until_load_level = [0,8], 
+                               save_path = save_path, type = 'u', thresh = 10)
 
         
         # plot_load_path_wrapper('05_Deploying\\data_out\\data_20260116_1510_casexx', case_study = '2D-3', until_load_level = [0,9], 

@@ -236,7 +236,7 @@ class fem_func():
         if D_NN.shape != (3,3):
             raise UserWarning('If D_NN does not have shape (3,3), this function will lead to erroneous results. Please adjust function or redo calculation.')
 
-        if scenario not in [8, 9, 109, 110, 111, 112]:
+        if scenario not in [8, 9, 109, 110, 111, 112, 201, 202]:
             # only apply shear stiffness reduction for base cases and combination cases which don't include any shear strains.
             pass
         else:

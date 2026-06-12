@@ -20,7 +20,7 @@ mat_tot_dict = {                        # no force definition here, as this chan
     'E_1': np.array([0]),
     'E_2': np.array([0]),
     'ms': np.array([600]),
-    's': np.array([201]),
+    's': np.array([203]),
     't_1': np.array([300]),
     't_2': np.array([0]),
     'nl': np.array([20]),
@@ -52,7 +52,8 @@ os.environ["WANDB_MODE"] = "online"
 # load_levels = [-2000, -4000, -6000, -8000, -9000, -10000, -10100, -10200, -10250, -10300]
 # load_levels = [200, 400, 600, 800, 900, 910, 920, 930, 940, 950]
 
-load_levels = [20e3, 40e3, 60e3, 80e3, 100e3, 120e3, 140e3, 160e3, 180e3]
+# load_levels = [40e3, 80e3, 120e3, 140e3, 150e3, 160e3, 165e3, 170e3, 175e3]
+load_levels = [20e3, 40e3, 80e3, 120e3, 150e3]
 
 
 # rho_y = 1.5%

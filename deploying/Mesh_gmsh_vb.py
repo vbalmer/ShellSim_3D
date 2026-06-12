@@ -553,269 +553,9 @@ def input_definition(mat, NN_hybrid):
     print("1.2 Boundary Conditions and Loads")
     # 2.1 Boundary Conditions
     
-    if scenario == 0: 
-        raise UserWarning('Out of Date')
-        " 2.1 Output:    - Global Boundary Conditions "
-        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
-        "                   BC_i in unit length (mm), 1234 if DOF is free"
+    ################ in-plane base cases ################
 
-        BC = np.array(([
-                        [0,0,0,0,0,0,0,0,0,1234,1234,1234],
-                        [L,L,0,0,0,0,0,0,0,1234,1234,1234],
-                        [L,L,B,B,0,0,0,0,0,1234,1234,1234],
-                        ]))
-
-
-        # 2.2 Loads             # Andreas example (shear)
-        " 2.2 Output:   - Load_el: Global Element Loads "
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
-        "               - Load_n: Global Nodal Loads"
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
-
-        Load_el = np.array([
-                        [0,0,B,B,0,0,3,0],
-                        ])
-
-        Load_n  = np.array([
-                        [0,0,B,B,0,0,3,Force_mag],
-        ])
-
-    elif scenario == 1:         # twisting
-        " 2.1 Output:    - Global Boundary Conditions "
-        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
-        "                   BC_i in unit length (mm), 1234 if DOF is free"
-
-        BC = np.array(([
-                        [L/2,L/2,B/2,B/2,0,0,0,0,0,0,0,0],
-                        ]))
-
-
-        # 2.2 Loads
-        " 2.2 Output:   - Load_el: Global Element Loads "
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
-        "               - Load_n: Global Nodal Loads"
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
-
-        
-        if isinstance(Force_mag, np.ndarray): 
-            nls = len(Force_mag)
-            Load_el = [[]]*nls
-            Load_n = [[]]*nls
-        else: 
-            nls = 1
-            Force_mag = [Force_mag]
-            Load_el = [[]]*nls
-            Load_n = [[]]*nls
-        
-        for i in range(nls):
-            Load_el[i] = np.array([
-                            [0,0,B,B,0,0,3,0],
-                            ])
-
-            Load_n[i]  = np.array([
-                            [0,0,B,B,0,0,3,-Force_mag[i]],
-                            [L,L,B,B,0,0,3,Force_mag[i]],
-                            [L,L,0,0,0,0,3,-Force_mag[i]],
-                            [0,0,0,0,0,0,3,Force_mag[i]],
-            ])
-
-
-    elif scenario == 2:         # asymmetrical bending
-        raise UserWarning('Out of Date')
-        " 2.1 Output:    - Global Boundary Conditions "
-        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
-        "                   BC_i in unit length (mm), 1234 if DOF is free"
-
-        BC = np.array(([
-                        [L,L,0,B,0,0,0,0,0,0,0,0],
-                        [0,L,0,0,0,0,0,0,0,1234,1234,1234],
-                        [0,L,B,B,0,0,0,0,0,1234,1234,1234],
-                        [0,0,0,B,0,0,0,0,0,1234,1234,1234]
-                        ]))
-
-
-        # 2.2 Loads
-        " 2.2 Output:   - Load_el: Global Element Loads "
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
-        "               - Load_n: Global Nodal Loads"
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
-
-        Load_el = np.array([
-                        [0,L,0,B,0,0,3,0],
-                        ])
-
-        Load_n  = np.array([
-                        # [0,L,0,B,0,0,3,Force_mag*(ms/L)**2]
-                        [0,L,0,B,0,0,3,Force_mag]
-                        ])
-        
-    
-    elif scenario == 3:         # bending + normal force
-        raise UserWarning('Out of Date')
-        " 2.1 Output:    - Global Boundary Conditions "
-        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
-        "                   BC_i in unit length (mm), 1234 if DOF is free"
-
-        BC = np.array(([
-                        [L,L,0,B,0,0,0,0,0,0,0,0],
-                        [0,L,0,0,0,0,0,0,0,1234,1234,1234],
-                        [0,L,B,B,0,0,0,0,0,1234,1234,1234],
-                        [0,0,0,B,0,0,0,0,0,0,0,0]
-                        ]))
-
-
-        # 2.2 Loads
-        " 2.2 Output:   - Load_el: Global Element Loads "
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
-        "               - Load_n: Global Nodal Loads"
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
-
-        Load_el = np.array([
-                        [0,L,0,B,0,0,3,0],
-                        ])
-
-        Load_n  = np.array([
-                        # [0,L,0,B,0,0,3,Force_mag*(ms/L)**2]
-                        [0,L,0,B,0,0,3,Force_mag]
-                        ])
-        
-
-    elif scenario == 4: 
-        raise UserWarning('Out of Date')
-
-        BC = np.array(([
-                        [0,L,0,0,0,0,0,0,0,1234,1234,1234],
-                        [0,L,B,B,0,0,0,0,0,1234,1234,1234]
-                        ]))
-
-
-        # 2.2 Loads
-        " 2.2 Output:   - Load_el: Global Element Loads "
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
-        "               - Load_n: Global Nodal Loads"
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
-
-        Load_el = np.array([
-                        [0,L,0,B,0,0,3,0],
-                        ])
-
-        Load_n  = np.array([
-                        # [0,L,0,B,0,0,3,Force_mag*(ms/L)**2]
-                        [0,L,0,B,0,0,3,Force_mag],
-                        [L,L,0,B,0,0,1,-Force_mag], 
-                        [0,0,0,B,0,0,1,Force_mag]
-                        ])
-        
-    
-    elif scenario == 5:         # normal membrane forces nx, ny, nxy
-        raise UserWarning('Out of Date')
-        " 2.1 Output:    - Global Boundary Conditions "
-        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
-        "                   BC_i in unit length (mm), 1234 if DOF is free"
-
-        BC = np.array(([
-                        [L/2,L/2,B/2,B/2,0,0,0,0,0,0,0,0],
-                        ]))
-
-
-        # 2.2 Loads
-        " 2.2 Output:   - Load_el: Global Element Loads "
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
-        "               - Load_n: Global Nodal Loads"
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
-
-        Load_el = np.array([
-                        [0,0,B,B,0,0,3,0],
-                        ])
-
-        Load_n  = np.array([
-                        # Normal forces x-direction
-                        [L,L,0,B,0,0,1,Force_mag], 
-                        [0,0,0,B,0,0,1,-Force_mag], 
-                        # Normal forces y-direction
-                        [0,L,0,0,0,0,2,-Force_mag], 
-                        [0,L,B,B,0,0,2,Force_mag], 
-                        # Shear forces x-direction
-                        [0,L,0,0,0,0,1,-Force_mag], 
-                        [0,L,B,B,0,0,1,Force_mag], 
-                        # Shear forces y-direction
-                        [L,L,0,B,0,0,2,-Force_mag], 
-                        [0,0,0,B,0,0,2,Force_mag], 
-                        ])
-
-    
-    elif scenario == 6:         # all possible combinations
-        raise UserWarning('Out of Date')
-        " 2.1 Output:    - Global Boundary Conditions "
-        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
-        "                   BC_i in unit length (mm), 1234 if DOF is free"
-
-        BC = np.array(([
-                        [L/2,L/2,B/2,B/2,0,0,0,0,0,0,0,0],
-                        ]))
-
-
-        # 2.2 Loads
-        " 2.2 Output:   - Load_el: Global Element Loads "
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
-        "               - Load_n: Global Nodal Loads"
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
-
-        Load_el = np.array([
-                        [0,0,B,B,0,0,3,0],
-                        ])
-
-        Load_n  = np.array([
-                        # Normal forces x-direction
-                        [L,L,0,B,0,0,1,Force_mag], 
-                        [0,0,0,B,0,0,1,-Force_mag], 
-                        # Normal forces y-direction
-                        [0,L,0,0,0,0,2,-Force_mag], 
-                        [0,L,B,B,0,0,2,Force_mag], 
-                        # Shear forces x-direction
-                        [0,L,0,0,0,0,1,-Force_mag], 
-                        [0,L,B,B,0,0,1,Force_mag], 
-                        # Shear forces y-direction
-                        [L,L,0,B,0,0,2,Force_mag], 
-                        [0,0,0,B,0,0,2,-Force_mag], 
-                        # uniform load z-direction
-                        [0,L,0,B,0,0,3,Force_mag],
-                        # point loads corners z-direction
-                        [0,0,B,B,0,0,3,-1.5*Force_mag],
-                        [L,L,B,B,0,0,3,Force_mag],
-                        [L,L,0,0,0,0,3,-1.5*Force_mag],
-                        [0,0,0,0,0,0,3,Force_mag]
-                        ])
-        
-    elif scenario == 7: 
-        raise UserWarning('Out of Date')
-        # pure 1D bending
-        " 2.1 Output:    - Global Boundary Conditions "
-        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
-        "                   BC_i in unit length (mm), 1234 if DOF is free"
-
-        BC = np.array(([
-                        [0,L,0,0,0,0,0,0,0,1234,1234,1234],
-                        [0,L,B,B,0,0,0,1234,0,1234,1234,1234]
-                        ]))
-
-
-        # 2.2 Loads
-        " 2.2 Output:   - Load_el: Global Element Loads "
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
-        "               - Load_n: Global Nodal Loads"
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
-
-        Load_el = np.array([
-                        [0,L,0,B,0,0,3,0],
-                        ])
-
-        Load_n  = np.array([
-                        # [0,L,0,B,0,0,3,Force_mag*(ms/L)**2]
-                        [0,L,0,B,0,0,3,Force_mag],
-                        ])
-
-    elif scenario == 8: 
+    if scenario == 8: 
         # pure membrane shear
         " 2.1 Output:    - Global Boundary Conditions "
         "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
@@ -866,7 +606,6 @@ def input_definition(mat, NN_hybrid):
                             [L,L,0,0,0,0,2,Force_mag[i]/2*(ms/L)],
                             [L,L,B,B,0,0,2,Force_mag[i]/2*(ms/L)],
                             ])
-
 
     elif scenario == 9: 
         # pure tension / compression in x-direction
@@ -926,8 +665,6 @@ def input_definition(mat, NN_hybrid):
                             [0,0,B,B,0,0,2,-0.18e6/2*(ms/L)],
                             [L,L,B,B,0,0,2,-0.18e6/2*(ms/L)],
                             ])
-
-
         
     elif scenario == 109: 
         # pure tension / compression in y-direction
@@ -990,6 +727,7 @@ def input_definition(mat, NN_hybrid):
 
                             ])
 
+    ################ in-plane combined cases ################
 
     elif scenario == 110:
         # pure tension /compression in x and y direction
@@ -1248,9 +986,7 @@ def input_definition(mat, NN_hybrid):
                             [L,L,0,0,0,0,2,Force_mag[i]/2*(ms/L)],
                             [L,L,B,B,0,0,2,Force_mag[i]/2*(ms/L)],
                             ])
-
-                        
-
+             
     elif scenario == 114:
         # tension in x-direction and compression y-direction + shear
 
@@ -1325,7 +1061,6 @@ def input_definition(mat, NN_hybrid):
                             [L,L,0,0,0,0,2,Force_mag[i]/2*(ms/L)],
                             [L,L,B,B,0,0,2,Force_mag[i]/2*(ms/L)],
                             ])
-
 
     elif scenario == 115:
     # pure compression in x and y direction + shear
@@ -1405,245 +1140,7 @@ def input_definition(mat, NN_hybrid):
                             ])
 
 
-    elif scenario == 10: 
-        # pure bending but with element load
-        " 2.1 Output:    - Global Boundary Conditions "
-        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
-        "                   BC_i in unit length (mm), 1234 if DOF is free"
-
-        BC = np.array(([
-                        [0,L,0,0,0,0,0,0,0,1234,1234,1234],
-                        [0,L,B,B,0,0,0,0,0,1234,1234,1234]
-                        ]))
-        
-        
-
-
-
-        # 2.2 Loads
-        " 2.2 Output:   - Load_el: Global Element Loads "
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
-        "               - Load_n: Global Nodal Loads"
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
-        
-        Load_el = np.array([
-                        [0,L,0,B,0,0,3,-Force_mag],
-                        ])
-
-        Load_n  = np.array([
-                        [0,L,0,B,0,0,3,0],
-                        ])
-        
-
-
-    elif scenario == 11: 
-        # bending + normal force but with element load (like scenario 10, but with normal force)
-        " 2.1 Output:    - Global Boundary Conditions "
-        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
-        "                   BC_i in unit length (mm), 1234 if DOF is free"
-
-        BC = np.array(([
-                        [0,L,0,0,0,0,0,0,0,1234,1234,1234],
-                        [0,L,B,B,0,0,0,0,0,1234,1234,1234]
-                        ]))
-        
-        # 2.2 Loads
-        " 2.2 Output:   - Load_el: Global Element Loads "
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
-        "               - Load_n: Global Nodal Loads"
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
-        
-        Load_el = np.array([
-                        [0,L,0,B,0,0,3,-Force_mag],
-                        ])
-
-        normal_force = F_N
-        Load_n  = np.array([
-                        [0,0,0+ms/2,B-ms/2,0,0,1,-normal_force*(ms/L)],
-                        [L,L,0+ms/2,B-ms/2,0,0,1,normal_force*(ms/L)],
-
-                        [0,0,0,0,0,0,1,-normal_force/2*(ms/L)],
-                        [L,L,0,0,0,0,1,normal_force/2*(ms/L)],
-                        [0,0,B,B,0,0,1,-normal_force/2*(ms/L)],
-                        [L,L,B,B,0,0,1,normal_force/2*(ms/L)],
-                        ])
-
-    elif scenario == 12: 
-        # pure bending but with element load
-        " 2.1 Output:    - Global Boundary Conditions "
-        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
-        "                   BC_i in unit length (mm), 1234 if DOF is free"
-
-        BC = np.array(([
-                        [0,L,0,0,0,0,0,0,0,1234,1234,1234],
-                        [0,L,B,B,0,0,0,0,0,1234,1234,1234]
-                        ]))
-        
-        
-
-
-
-        # 2.2 Loads
-        " 2.2 Output:   - Load_el: Global Element Loads "
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
-        "               - Load_n: Global Nodal Loads"
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
-        
-        Load_el = np.array([
-                        [0,L,0,B,0,0,3,0],
-                        ])
-
-        Load_n  = np.array([
-                        [L/2,L/2,B/2,B/2,0,0,3,-Force_mag],
-                        ])
-        
-    elif scenario == 13: 
-        # pure bending without membrane forces
-        " 2.1 Output:    - Global Boundary Conditions "
-        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
-        "                   BC_i in unit length (mm), 1234 if DOF is free"
-
-        BC = np.array(([
-                        [0,L,0,0,0,0,1234,0,0,1234,1234,1234],
-                        [0,L,B,B,0,0,1234,1234,0,1234,1234,1234],
-                        [0,0,0,0,0,0,0   ,0   ,0,1234,1234,1234]
-                        ]))
-        
-        
-
-
-        # 2.2 Loads
-        " 2.2 Output:   - Load_el: Global Element Loads "
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
-        "               - Load_n: Global Nodal Loads"
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
-        
-        Load_el = np.array([
-                        [0,L,0,B,0,0,3,-Force_mag],
-                        ])
-
-        Load_n  = np.array([
-                        [0,L,0,B,0,0,3,0],
-                        ])
-
-
-
-    elif scenario == 20:
-
-        # 2d bending, simply supported at all edges (scenario for glass but could also be used for others)
-
-        " 2.1 Output:    - Global Boundary Conditions "
-        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
-        "                   BC_i in unit length (mm), 1234 if DOF is free"
-
-        BC = np.array(([
-                        [0,L,0,0,0,0,0,0,0,1234,1234,1234],
-                        [0,L,B,B,0,0,0,0,0,1234,1234,1234],
-                        [0,0,0,B,0,0,0,0,0,1234,1234,1234],
-                        [L,L,0,B,0,0,0,0,0,1234,1234,1234]
-                        ]))
-        
-        # 2.2 Loads
-        " 2.2 Output:   - Load_el: Global Element Loads "
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
-        "               - Load_n: Global Nodal Loads"
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
-        
-        # uniform load everywhere on the plate, defined by Force_mag
-        Load_el = np.array([
-                        [0,L,0,B,0,0,3,-Force_mag],
-                        ])
-
-        Load_n  = np.array([[0,L,0,B,0,0,3,0]])
-
-    elif scenario == 21:
-
-        # 2d bending, only supported at 4 edge points
-
-        " 2.1 Output:    - Global Boundary Conditions "
-        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
-        "                   BC_i in unit length (mm), 1234 if DOF is free"
-
-        BC = np.array(([
-                        [0,0,0,0,0,0,0,0,0,1234,1234,1234],
-                        [L,L,B,B,0,0,0,0,0,1234,1234,1234],
-                        [0,0,B,B,0,0,0,0,0,1234,1234,1234],
-                        [L,L,0,0,0,0,0,0,0,1234,1234,1234]
-                        ]))
-        
-        # 2.2 Loads
-        " 2.2 Output:   - Load_el: Global Element Loads "
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
-        "               - Load_n: Global Nodal Loads"
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
-        
-        # uniform load everywhere on the plate, defined by Force_mag
-        Load_el = np.array([
-                        [0,L,0,B,0,0,3,-Force_mag],
-                        ])
-
-        Load_n  = np.array([[0,L,0,B,0,0,3,0]])
-
-    elif scenario == 22:
-
-        # 2d bending, simply supported at all edges, no membrane forces (free to move)
-
-        " 2.1 Output:    - Global Boundary Conditions "
-        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
-        "                   BC_i in unit length (mm), 1234 if DOF is free"
-
-        BC = np.array(([
-                        [0,L,0,0,0,0,1234,1234,0,1234,1234,1234],
-                        [0,L,B,B,0,0,1234,1234,0,1234,1234,1234],
-                        [0,0,0,B,0,0,1234,1234,0,1234,1234,1234],
-                        [L,L,0,B,0,0,1234,1234,0,1234,1234,1234], 
-                        [0,0,0,0,0,0,0,   0,   0,1234,1234,1234],
-                        ]))
-        
-        # 2.2 Loads
-        " 2.2 Output:   - Load_el: Global Element Loads "
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
-        "               - Load_n: Global Nodal Loads"
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
-        
-        # uniform load everywhere on the plate, defined by Force_mag
-        Load_el = np.array([
-                        [0,L,0,B,0,0,3,-Force_mag],
-                        ])
-
-        Load_n  = np.array([[0,L,0,B,0,0,3,0]])
-    
-    elif scenario == 23:
-
-        # 2d bending, simply supported at all edges, no membrane forces (free to move)
-
-        " 2.1 Output:    - Global Boundary Conditions "
-        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
-        "                   BC_i in unit length (mm), 1234 if DOF is free"
-
-        BC = np.array(([
-                        [0,L,0,0,0,0,1234,1234,0,1234,1234,1234],
-                        [0,L,B,B,0,0,1234,1234,0,1234,1234,1234],
-                        [0,0,0,B,0,0,0,0,0,1234,1234,1234],
-                        [L,L,0,B,0,0,1234,1234,0,1234,1234,1234], 
-                        [0,0,0,0,0,0,0,   0,   0,1234,1234,1234],
-                        ]))
-        
-        # 2.2 Loads
-        " 2.2 Output:   - Load_el: Global Element Loads "
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
-        "               - Load_n: Global Nodal Loads"
-        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
-        
-        # uniform load everywhere on the plate, defined by Force_mag
-        Load_el = np.array([
-                        [0,L,0,B,0,0,3,-Force_mag],
-                        ])
-
-        Load_n  = np.array([[0,L,0,B,0,0,3,0]])
-
-
-
+    ################ out-of-plane base cases ################
 
     elif scenario == 201: 
         # pure bending in y-direction
@@ -1660,16 +1157,8 @@ def input_definition(mat, NN_hybrid):
                         [L-f, L+f, B-f, B+f, -f, f, 0, 1234,0,1234,1234,1234],
                         [-f, f, B-f, B+f, -f, f, 1234, 1234,0,1234,1234,1234],
                         ]))
+
         
-        # BC = np.array(([
-        #                 [-f, L+f, -f, f, -f, f, 1234, 1234,0,1234,1234,1234],  # lower edge (nur z)
-        #                 [-f, L+f, B-f, B+f, -f, f, 1234, 1234,0,1234,1234,1234],  # upper edge (nur z)
-        #                 [L-f, L+f, B-f, B+f, -f, f, 0, 1234,0,1234,1234,1234],   # upper right corner
-        #                 [L-f, L+f, 0-f, 0+f, -f, f, 1234, 0,0,1234,1234,1234],   # lower right corner
-        #                 [0-f, 0+f, 0-f, 0+f, -f, f, 1234, 0,0,1234,1234,1234],   # lower left corner
-        #                 ]))
-
-
         # BC = np.array(([
         #                 [L/2-f, L/2+f, B/2-f, B/2+f, -f, f, 0,0,0,0,0,0],
         #                 ]))
@@ -1721,6 +1210,143 @@ def input_definition(mat, NN_hybrid):
 
                             ])
         
+    elif scenario == 202: 
+        # pure bending in x-direction
+
+        " 2.1 Output:    - Global Boundary Conditions "
+        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
+        "                   BC_i in unit length (mm), 1234 if DOF is free"
+
+        
+        f = 1
+        BC = np.array(([
+                        [-f, f, -f, f, -f, f, 1234, 0,0,1234,1234,1234],
+                        [L-f, L+f, -f, f, -f, f, 1234, 0,1234,1234,1234,1234],
+                        [L-f, L+f, B-f, B+f, -f, f, 0, 1234,0,1234,1234,1234],
+                        [-f, f, B-f, B+f, -f, f, 1234, 1234,0,1234,1234,1234],
+                        ]))
+
+        
+        # BC = np.array(([
+        #                 [L/2-f, L/2+f, B/2-f, B/2+f, -f, f, 0,0,0,0,0,0],
+        #                 ]))
+
+        
+        " 2.2 Output:   - Load_el: Global Element Loads "
+        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
+        "               - Load_n: Global Nodal Loads"
+        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
+
+
+        if isinstance(Force_mag, np.ndarray): 
+            nls = len(Force_mag)
+            Load_el = [[]]*nls
+            Load_n = [[]]*nls
+        else: 
+            nls = 1
+            Force_mag = [Force_mag]
+            Load_el = [[]]*nls
+            Load_n = [[]]*nls
+
+        for i in range(nls):
+            # no element loads (magnitude = 0)
+            Load_el[i] = np.array([
+                            [0,L,0,B,0,0,3,0],
+                            ])
+            
+            # nodal loads
+            Load_n[i]  = np.array([
+                            # minor negative bending in y-direction
+                            # [0,0,0+ms/2,L-ms/2,0,0,5,180e3*(ms/L)],
+                            # [B,B,0+ms/2,L-ms/2,0,0,5,-180e3*(ms/L)],
+
+                            # [0,0,0,0,0,0,5,180e3/2*(ms/L)],
+                            # [0,0,L,L,0,0,5,-180e3/2*(ms/L)],
+                            # [B,B,0,0,0,0,5,180e3/2*(ms/L)],
+                            # [B,B,L,L,0,0,5,-180e3/2*(ms/L)],
+
+
+                            # bending in x-direction
+                            [0,0,0+ms/2,L-ms/2,0,0,5,Force_mag[i]*(ms/L)],
+                            [B,B,0+ms/2,B-ms/2,0,0,5,-Force_mag[i]*(ms/L)],
+
+                            [0,0,0,0,0,0,5,Force_mag[i]/2*(ms/L)],   # (0,0)  x=0  -> F/2
+                            [B,B,0,0,0,0,5,-Force_mag[i]/2*(ms/L)],    # (B,0)  x=B  -> -F/2
+                            [0,0,L,L,0,0,5,Force_mag[i]/2*(ms/L)],   # (0,L)  x=0  -> +F/2
+                            [B,B,L,L,0,0,5,-Force_mag[i]/2*(ms/L)],    # (B,L)  x=B  -> -F/2
+
+
+                            ])
+
+    elif scenario == 203: 
+        # pure twisting
+
+        " 2.1 Output:    - Global Boundary Conditions "
+        "                  [xmin,xmax,ymin,ymax,zmin,zmax,BC_ux,BC_uy,BC_uz,BC_thx,BC_thy,BC_thz]"
+        "                   BC_i in unit length (mm), 1234 if DOF is free"
+
+        
+        f = 1
+        
+        # BC = np.array(([
+        #                 [L/2-f, L/2+f, B/2-f, B/2+f, -f, f, 0,0,0,0,0,0],
+        #                 ]))
+
+        BC = np.array(([
+                        [L/2-f, L/2+f, -f, f, -f, f, 1234, 0,0,1234,1234,1234],
+                        [L/2-f, L/2+f, B-f, B+f, -f, f, 0, 1234,0,1234,1234,1234],
+                        [L-f, L+f, B/2-f, B/2+f, -f, f, 0, 1234,0,1234,1234,1234],
+                        # [-f, f, B/2-f, B/2+f, -f, f, 1234, 0,0,1234,1234,1234],
+                        ]))
+
+        
+        " 2.2 Output:   - Load_el: Global Element Loads "
+        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N/mm2]]"
+        "               - Load_n: Global Nodal Loads"
+        "                 [xmin,xmax,ymin,ymax,zmin,zmax,direction(x=1,y=2,z=3,thx=4,thy=5,thz=6),magnitude[N]]"
+
+
+        if isinstance(Force_mag, np.ndarray): 
+            nls = len(Force_mag)
+            Load_el = [[]]*nls
+            Load_n = [[]]*nls
+        else: 
+            nls = 1
+            Force_mag = [Force_mag]
+            Load_el = [[]]*nls
+            Load_n = [[]]*nls
+
+        for i in range(nls):
+            # no element loads (magnitude = 0)
+            Load_el[i] = np.array([
+                            [0,L,0,B,0,0,3,0],
+                            ])
+            
+            # nodal loads
+            Load_n[i]  = np.array([
+
+                            #twisting along the y-edges
+                            [0,0,0+ms/2,L-ms/2,0,0,4,Force_mag[i]*(ms/L)],
+                            [B,B,0+ms/2,B-ms/2,0,0,4,-Force_mag[i]*(ms/L)],
+                            #twisting along the x-edges
+                            [0+ms/2,L-ms/2,0,0,0,0,5,-Force_mag[i]*(ms/L)],
+                            [0+ms/2,B-ms/2,B,B,0,0,5,Force_mag[i]*(ms/L)],
+
+                            # in x-direction at edges
+                            [0,0,0,0,0,0,4,Force_mag[i]/2*(ms/L)],   # (0,0)  x=0  -> F/2
+                            [B,B,0,0,0,0,4,-Force_mag[i]/2*(ms/L)],    # (B,0)  x=B  -> -F/2
+                            [0,0,L,L,0,0,4,Force_mag[i]/2*(ms/L)],   # (0,L)  x=0  -> +F/2
+                            [B,B,L,L,0,0,4,-Force_mag[i]/2*(ms/L)],    # (B,L)  x=B  -> -F/2
+
+
+                            # in y-direction at edges
+                            [0,0,0,0,0,0,5,-Force_mag[i]/2*(ms/L)],   # (0,0)  x=0  -> -F/2
+                            [B,B,0,0,0,0,5,-Force_mag[i]/2*(ms/L)],    # (B,0)  x=B  -> -F/2
+                            [0,0,L,L,0,0,5,Force_mag[i]/2*(ms/L)],   # (0,L)  x=0  -> +F/2
+                            [B,B,L,L,0,0,5,Force_mag[i]/2*(ms/L)],    # (B,L)  x=B  -> +F/2
+
+                            ])
+
 
 
     # -------------------------------------------------------------------------------------------------------------------- #
