@@ -33,33 +33,7 @@ def get_constant_sampling_params(sample_2d:bool) -> tuple:
 
     '''
 
-    c = {
-        'n_samples_2D': 1e6, 
-        'n_samples_3D': 6e6,         #4e9,47e3 (for 6 elements per dimension), 64e6 (20 elements per dimension)
-
-        'min': [-3e-3]*2 + [-4e-3],
-        'max': [5e-3]*2  + [4e-3],
-        't': 300,
-        'CC': 1,
-        'n_layer': 20,
-        'nu': 0,
-        'fsy': 435,
-        'fsu': 470,
-        'Es': 205e3,
-        'Esh': 9.4e3,
-        'D': 16,
-        'Dmax': 16,
-        's': 200,
-        'rho_x': [0.025]*4 + [0]*12 + [0.025]*4,    # length of the array needs to correspond to the amount of layers.
-        'rho_y': [0.025]*4 + [0]*12 + [0.025]*4,
-        'rho_sublayer': True,
-
-    }
-
-    c_3D = {        
-        'min': [-3e-3]*2 + [-4e-3] + [-0.02e-3]*2 + [-0.027e-3],        # units: [-], [1/mm]
-        'max': [5e-3]*2  + [4e-3] +  [0.033e-3]*2 + [0.027e-3],         # units: [-], [1/mm]
-    }
+    from constant_sampling_params import c, c_3D
 
     if not sample_2d:
         c.update(c_3D)
@@ -176,32 +150,42 @@ def sample_eps(sampler:str, constants: dict, sampler_type_log = 'lhs', zero_valu
         data = convert_log_data_to_eps(data_, max_log_neg, max_log_pos)                                                                               # TODO: Write function
 
     elif sampler == 'combined_log_uniform':
-        half_samples = int(constants['n_samples_3D']/2)
+        if constants['p_samples_log'] is not None:
+            log_samples = int(constants['n_samples_3D']*constants['p_samples_log'])
+            uniform_samples = int(constants['n_samples_3D']*(1-constants['p_samples_log']))
+        else: 
+            log_samples = int(constants['n_samples_3D']/2)
+            uniform_samples = log_samples.copy()
 
-        data_, max_log_neg, max_log_pos = sample_exponents(constants, sampler_type_log, zero_value_epsx, num_samples = half_samples)
+        data_, max_log_neg, max_log_pos = sample_exponents(constants, sampler_type_log, zero_value_epsx, num_samples = log_samples)
         data_0 = convert_log_data_to_eps(data_, max_log_neg, max_log_pos) 
 
         t1 = time.perf_counter()
         par_names = ['eps_x', 'eps_y', 'eps_xy', 'chi_x', 'chi_y', 'chi_xy']
-        uniform_sampler = samplers(par_names, constants['min'], constants['max'], samples= half_samples)
+        uniform_sampler = samplers(par_names, constants['min'], constants['max'], samples= uniform_samples)
         data_1 = uniform_sampler.uniform_multi_grouped()
-        print(f'Sampled {int(half_samples/1e9)}*1e9 values for 3D-epsilon')
+        print(f'Sampled {int(uniform_samples/1e9)}*1e9 values for 3D-epsilon')
         t_elapsed_1 = time.perf_counter() - t1
         print(f'3D Sampling uniformly done in {t_elapsed_1/60:.2f}min')
 
         data = np.concatenate((data_0, data_1), axis = 0)
 
     elif sampler == 'combined_log_lhs':
-        half_samples = int(constants['n_samples_3D']/2)
+        if constants['p_samples_log'] is not None:
+            log_samples = int(constants['n_samples_3D']*constants['p_samples_log'])
+            uniform_samples = int(constants['n_samples_3D']*(1-constants['p_samples_log']))
+        else: 
+            log_samples = int(constants['n_samples_3D']/2)
+            uniform_samples = log_samples.copy()
 
-        data_, max_log_neg, max_log_pos = sample_exponents(constants, sampler_type_log, zero_value_epsx, num_samples = half_samples)
+        data_, max_log_neg, max_log_pos = sample_exponents(constants, sampler_type_log, zero_value_epsx, num_samples = log_samples)
         data_0 = convert_log_data_to_eps(data_, max_log_neg, max_log_pos) 
 
         t1 = time.perf_counter()
         par_names = ['eps_x', 'eps_y', 'eps_xy', 'chi_x', 'chi_y', 'chi_xy']
-        lhs_sampler = samplers(par_names, constants['min'], constants['max'], samples= half_samples)
+        lhs_sampler = samplers(par_names, constants['min'], constants['max'], samples= uniform_samples)
         data_1 = lhs_sampler.lhs(criterion = 'c')
-        print(f'Sampled {int(half_samples/1e9)}*1e9 values for 3D-epsilon')
+        print(f'Sampled {int(uniform_samples/1e9)}*1e9 values for 3D-epsilon')
         t_elapsed = time.perf_counter() - t1
         print(f'3D Sampling with LHS done in {t_elapsed/60:.2f}min')
 
@@ -253,8 +237,8 @@ def sample_exponents(constants, sampler_type_log, zero_value_epsx, num_samples =
     t = constants['t']
     zero_vec = [zero_value_epsx]*2+[zero_value_epsx/10]+[zero_value_epsx/(t/2)]*2 + [(zero_value_epsx/10)/(t/2)]
 
-    min = constants['min']
-    max = constants['max']
+    min = constants['min_log']
+    max = constants['max_log']
     max_log_neg = np.log10([abs(x) for x in min])
     max_log_pos = np.log10([abs(x) for x in max])
 
@@ -1031,7 +1015,7 @@ def get_mask_strains(eps_top, eps_bot, eps_range, gamma_range):
 
     return mask
 
-def get_mask_strains_principal(eps_top, eps_bot, eps_2_min = -3e-3, eps_x_y_max = 50e-3):
+def get_mask_strains_principal(eps_top, eps_bot, eps_2_min = -5e-3, eps_x_y_max = 55e-3):
     """
     get mask based on principal strain filtering (instead of just filtering like in "get_mask_strain")
 
