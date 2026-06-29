@@ -3,7 +3,7 @@
 import os
 import math
 import numpy as np
-import cupy as cp
+import numpy as cp
 import pyDOE as doe
 from itertools import permutations
 import time
@@ -43,7 +43,7 @@ def get_constant_sampling_params(sample_2d:bool) -> tuple:
     idx = dict_CC['CC'].index(c['CC'])
     dict_CC_one = {key: values[idx] for key, values in dict_CC.items()}
 
-    dict_CC_one.update({'fsy': c["fsy"], 'fsu': c["fsu"], 'Es': c["Es"], 'Esh': c["Esh"], 'D': c["D"], 'Dmax': c["Dmax"], 's': c["s"]})
+    dict_CC_one.update({'fsy': c["fsy"], 'fsu': c["fsu"], 'Es': c["Es"], 'Esh': c["Esh"], 'D_x': c["D_x"], 'D_y': c["D_y"], 'Dmax': c["Dmax"], 's': c["s"]})
     mat_dict = dict_CC_one
 
     return c, mat_dict
@@ -65,7 +65,7 @@ def setup_sampler_dirs(constants: dict) -> tuple:
         constants['n_samples_3D'] = int(float(os.environ['N_SAMPLES_3D']))
         print(f"[sampler] N_SAMPLES_3D override -> {constants['n_samples_3D']:,}")
 
-    save_data_dir = os.environ.get('DATA_DIR') or os.path.join('D:\\', 'VeraBalmer', 'ShellSim3D')
+    save_data_dir = os.environ.get('DATA_DIR') or os.path.join('C:\\', 'kuy_sampling_strain-stress')
     os.makedirs(save_data_dir, exist_ok=True)
     print(f'[sampler] Saving data to: {save_data_dir}')
 
@@ -970,7 +970,7 @@ def filter_3d_data(eps_g, sig_g = None, dh = None, constants = None, prefilter =
     # 1 - Calculate top and bottom strains from eps_g
     simulatesig = SigSimulator(constants)
     e = simulatesig.find_e_vec(cp.array(eps_g))
-    eps_top, eps_bot = e[:,-1,:].get(), e[:,0,:].get()
+    eps_top, eps_bot = e[:,-1,:], e[:,0,:]
 
     # 2 - Check whether strains lie in desired ranges
     if principal:

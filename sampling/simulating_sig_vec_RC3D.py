@@ -296,8 +296,8 @@ def single_batch_execution(i:int, batch_size: int, simulatesig:SigSimulator, mat
     # 2.4 Find stiffnesses
     dh_batch = simulatesig.find_dh_vec(s, mat_dict, cm_klij = cm)
 
-    sig_g[start:end,:] = sig_g_batch.get().astype(sig_g.dtype)
-    dh[start:end,:] = dh_batch.get().astype(dh.dtype)
+    sig_g[start:end,:] = sig_g_batch.astype(sig_g.dtype)
+    dh[start:end,:] = dh_batch.astype(dh.dtype)
 
     return sig_g, dh, t0
 

@@ -3,9 +3,9 @@
 
 import os
 import config
-import cupy as cp
+import numpy as cp
 import wandb
-config.USE_GPU = True
+config.USE_GPU = False
 
 from sampler_utils_RC3D import *
 from simulating_sig_vec_RC3D import *
@@ -16,7 +16,7 @@ PLOT_D        = True
 SAVE_D        = True
 FILTER_DATA   = True
 CHUNKED       = False
-LOG_WANDB     = os.environ.get('LOG_WANDB', '1').lower() in ('1', 'true', 'yes')
+LOG_WANDB     = os.environ.get('LOG_WANDB', '0').lower() in ('1', 'true', 'yes')
 SAMPLING_TYPE = 'combined_log_uniform'   
 REMOVE_OUTLIERS = True
 CHUNK_SIZE    = 10_000_000

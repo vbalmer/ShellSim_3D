@@ -54,7 +54,8 @@ class ConstitutiveLaws():
         ntot = self.e.shape[0]
         self.rho_x = np.broadcast_to(np.array(constants['rho_x'])[np.newaxis,:,np.newaxis], (ntot, self.nl, 1))
         self.rho_y = np.broadcast_to(np.array(constants['rho_y'])[np.newaxis,:,np.newaxis], (ntot, self.nl, 1))
-        self.D     = constants['D']
+        self.D_x = np.broadcast_to(np.array(constants['D_x'])[np.newaxis,:,np.newaxis], (ntot, self.nl, 1))
+        self.D_y = np.broadcast_to(np.array(constants['D_y'])[np.newaxis,:,np.newaxis], (ntot, self.nl, 1))
 
 
         # Other constants:
@@ -193,7 +194,7 @@ class ConstitutiveLaws():
 
         return sc3
     
-    def ssr(self, e, ec, ecs, srm, rho):
+    def ssr(self, e, ec, ecs, srm, rho, D):
         """ ------------------------------------------- Define Output---------------------------------------------------
             --------------------------------------------    INPUT: -----------------------------------------------------
             - e:            strain at integration point in one layer, just at locations where there is tension-tension and rho != 0
@@ -203,12 +204,13 @@ class ConstitutiveLaws():
             - ecs:          constant, currently zero (what is it?)
             - sr:           crack spacing
             - rho:          rho only at given locations in element and for one dimension (shape: n_tot, nl*mask, 1)
+            - D:            reinforcement diameter only at given locations in element and for one dimension (shape: n_tot, nl*mask, 1)
             NOTE: Only for cms_klij = 1 (bilinear + TCM)
             --------------------------------------------- OUTPUT:-------------------------------------------------------
             - ss:           steel stressses
         -------------------------------------------------------------------------------------------------------------"""
 
-        ssr = self.ssr_tcm_bilin(e+ecs, ec+ecs, srm, rho)
+        ssr = self.ssr_tcm_bilin(e+ecs, ec+ecs, srm, rho, D)
         # ssr shape: (n_tot, nl*mask, 1)
 
         # 1. Select tbi based on ssr > fsy                              # only required for fixed cracks
@@ -258,22 +260,24 @@ class ConstitutiveLaws():
 
         return ss
 
-    def ssr_seelhofer(self, e, ec, srm, rho):
+    def ssr_seelhofer(self, e, ec, srm, rho, D):
         """ --------------------- Calculate Steel Stress with Seelhofer for non-stabilised crack -----------------------
                 ------------------------------------------ INPUT (self.): ----------------------------------------------
                 - e: normal strain
                 - ec: axial concrete compressive strain from mohr's circle of concrete strains
                 - srm: Crack spacing: srm = lambda * sr0
                 - rho:          rho only at given locations in element and for one dimension (shape: n_tot, nl*mask, 1)
+                - D:          reinforcement diameter only at given locations in element and for one dimension (shape: n_tot, nl*mask, 1)
+
                 --------------------------------------------- OUTPUT:---------------------------------------------------
                 - ssr: steel/CFRP stress at the crack according to Seelhofer
             ---------------------------------------------------------------------------------------------------------"""
         # 2 Elastic crack element
-        a = 4 * self.tb0 / (self.Es * self.D)
-        b = 4 * self.tb0 / (self.Ec * self.D) * rho / (1 - rho) * srm
+        a = 4 * self.tb0 / (self.Es * D)
+        b = 4 * self.tb0 / (self.Ec * D) * rho / (1 - rho) * srm
         c = srm * (ec - e)
         x1 = (-b + np.sqrt(b**2 - 4 * a * c)) / (2 * a)
-        ssr = (ec + 4 * self.tb0 / (self.Ec * self.D) * rho / (1 - rho) * x1 + 4 * self.tb0 / (self.Es * self.D) * x1) * self.Es
+        ssr = (ec + 4 * self.tb0 / (self.Ec * D) * rho / (1 - rho) * x1 + 4 * self.tb0 / (self.Es * D) * x1) * self.Es
 
         # 3 Elastic-Plastic crack element
         mask_ep = (x1 < srm / 2) & (ssr > self.fsy)
@@ -282,15 +286,15 @@ class ConstitutiveLaws():
             ec_ep = ec.copy()
             ec_ep[mask_ep] = ec[mask_ep] + (self.fsy / self.Es - ec[mask_ep]) * self.Es * rho[mask_ep] / (1 - rho[mask_ep]) / self.Ec
 
-            x1_ep = (self.fsy - ec_ep * self.Es) * self.D / (4 * self.tb0)
+            x1_ep = (self.fsy - ec_ep * self.Es) * D / (4 * self.tb0)
 
             c_ep = -e * srm + 2 * ec_ep * (srm / 2 - x1_ep) + (self.fsy / self.Es + ec_ep) * x1_ep
             b_ep = 2 * (self.fsy / self.Es - ec_ep)
-            a_ep = 4 * self.tb1 / (self.D * self.Esh)
+            a_ep = 4 * self.tb1 / (D * self.Esh)
             discriminant = np.where(mask_ep,b_ep**2 - 4 * a_ep * c_ep,0.0)
             x2_ep = (-b_ep + np.sqrt(discriminant)) / (2 * a_ep)
 
-            ssr_ep = ec_ep * self.Es + x1_ep * 4 * self.tb0 / self.D + x2_ep * 4 * self.tb1 / self.D
+            ssr_ep = ec_ep * self.Es + x1_ep * 4 * self.tb0 / D + x2_ep * 4 * self.tb1 / D
 
             x1[mask_ep]  = x1_ep[mask_ep]
             ssr[mask_ep] = ssr_ep[mask_ep]
@@ -298,19 +302,20 @@ class ConstitutiveLaws():
 
         return x1, ssr
 
-    def ssr_tcm_bilin(self, e, ec, srm, rho):
+    def ssr_tcm_bilin(self, e, ec, srm, rho, D):
         """ ------------------------------------ Calculate Steel Stress with the TCM -----------------------------------
                 ------------------------------------------ INPUT (self.): ----------------------------------------------
                 - e:        normal strain (just at masked locations, shape: (ntot, nl*mask, 1))
                 - ec:       axial concrete compressive strain from mohr's circle of concrete strains, shape: (ntot, nl*mask, 1)
                 - srm:      Crack spacing: srm = lambda * sr0, shape: (ntot, nl*mask, 1)
                 - rho:          rho only at given locations in element and for one dimension (shape: n_tot, nl*mask, 1)
+                - D:          reinforcement diameter only at given locations in element and for one dimension (shape: n_tot, nl*mask, 1)
                 --------------------------------------------- OUTPUT:---------------------------------------------------
                 - ss_out:   steel stress at the crack according to TCM, shape: (ntot, nl*mask, 1)
             ---------------------------------------------------------------------------------------------------------"""
 
         # 1 Seelhofer
-        x1, ssr = self.ssr_seelhofer(e, ec, srm, rho)
+        x1, ssr = self.ssr_seelhofer(e, ec, srm, rho, D)
 
         # 2. TCM
         mask_tcm = x1 >= srm / 2
@@ -321,14 +326,14 @@ class ConstitutiveLaws():
         st_naked = self.ss_bilin(e)
 
         # 2.2 Steel stress for fully elastic crack element
-        s1 = st_naked + self.tb0 * srm / self.D
+        s1 = st_naked + self.tb0 * srm / D
 
         # 2.3 Steel stress for fully plastic element
-        s3 = self.fsy + self.Esh * (e - self.fsy / self.Es) + self.tb1 * srm / self.D
+        s3 = self.fsy + self.Esh * (e - self.fsy / self.Es) + self.tb1 * srm / D
 
         # 2.4 Masks for stress regimes (only where mask_tcm is active)
         mask_elastic  = mask_tcm & (s1 <= self.fsy)
-        mask_plastic  = mask_tcm & (s1 > self.fsy) & (s3 - (2 * self.tb1 * srm / self.D) >= self.fsy)
+        mask_plastic  = mask_tcm & (s1 > self.fsy) & (s3 - (2 * self.tb1 * srm / D) >= self.fsy)
         mask_partial  = mask_tcm & ~mask_elastic & ~mask_plastic
 
         # 2.4.1 Fully elastic
@@ -338,10 +343,10 @@ class ConstitutiveLaws():
         ss_out[mask_plastic] = s3[mask_plastic]
 
         # 2.4.3 Partially elastic
-        s2 = (self.fsy - self.Es * e) * self.tb1 * srm / self.D * (self.tb0 / self.tb1 - self.Es / self.Esh)
-        s2 = s2 + self.Es / self.Esh * self.tb0 * self.tb1 * srm ** 2 / self.D ** 2
+        s2 = (self.fsy - self.Es * e) * self.tb1 * srm / D * (self.tb0 / self.tb1 - self.Es / self.Esh)
+        s2 = s2 + self.Es / self.Esh * self.tb0 * self.tb1 * srm ** 2 / D ** 2
         discriminant = np.where(mask_partial,s2,0.0)
-        s2 = self.tb0 * srm / self.D - np.sqrt(discriminant)                # to avoid warning in output.
+        s2 = self.tb0 * srm / D - np.sqrt(discriminant)                # to avoid warning in output.
         s2 = self.fsy + 2 * s2 / (self.tb0 / self.tb1 - self.Es / self.Esh)
         ss_out[mask_partial] = s2[mask_partial]
 
@@ -365,16 +370,28 @@ class ConstitutiveLaws():
         # 1 Initial Assumption
         # 1.1 in x
         mask_rhox = self.rho_x > 1e-9
-        denom_x = np.where(mask_rhox, 2 * self.tb0 / self.D * self.rho_x, 1.0)  # safe dummy in false branch, to avoid divide by zero warning.
+        denom_x = np.where(mask_rhox, 2 * self.tb0 / self.D_x * self.rho_x, 1.0)  # safe dummy in false branch, to avoid divide by zero warning.
+        
+        # D_x = np.array(self.D_x)
+        # mask_rhox_squeezed = np.squeeze(mask_rhox, axis=2)
+        # safe_D_x = np.where(mask_rhox_squeezed, D_x, 1.0)
+        # denom_x = 2 * self.tb0 / safe_D_x * np.squeeze(self.rho_x, axis=2)
+
         srx0_mask = np.where(mask_rhox, self.fct * (1 - self.rho_x) / denom_x, 1e3)
-        srxmax = np.where(mask_rhox, self.D / (2 * self.tb0) * self.fsy + self.D / (2 * self.tb1) * (self.fsu - self.fsy), 1e3)
+        srxmax = np.where(mask_rhox, self.D_x / (2 * self.tb0) * self.fsy + self.D_x / (2 * self.tb1) * (self.fsu - self.fsy), 1e3)
         srx0 = np.minimum(srx0_mask, srxmax)
 
         # 1.2 in y
         mask_rhoy = self.rho_y > 1e-9
-        denom_y = np.where(mask_rhoy, 2 * self.tb0 / self.D * self.rho_y, 1.0)  # safe dummy in false branch, to avoid divide by zero warning.
+        denom_y = np.where(mask_rhoy, 2 * self.tb0 / self.D_y * self.rho_y, 1.0)  # safe dummy in false branch, to avoid divide by zero warning.
+        
+        # D_y = np.array(self.D_y)
+        # mask_rhoy_squeezed = np.squeeze(mask_rhoy, axis=2)
+        # safe_D_y = np.where(mask_rhoy_squeezed, D_y, 1.0)
+        # denom_y = 2 * self.tb0 / safe_D_y * np.squeeze(self.rho_y, axis=2)
+
         sry0_mask = np.where(mask_rhoy, self.fct * (1 - self.rho_y) / denom_y, 1e3)
-        srymax = np.where(mask_rhoy, self.D / (2 * self.tb0) * self.fsy + self.D / (2 * self.tb1) * (self.fsu - self.fsy), 1e3)
+        srymax = np.where(mask_rhoy, self.D_y / (2 * self.tb0) * self.fsy + self.D_y / (2 * self.tb1) * (self.fsu - self.fsy), 1e3)
         sry0 = np.minimum(sry0_mask, srymax)
 
         # 2 Actual crack spacing as a function of lambda
@@ -498,7 +515,7 @@ class ConstitutiveLaws():
         mask_e = e[:,:,0:1] > ecx
         mask_1_x = mask & mask_rhox & mask_e
         ssx[mask_1_x] = self.ssr(self.e[:,:,0:1][mask_1_x], ecx[mask_1_x], self.ecsx, 
-                                srx[mask_1_x], self.rho_x[mask_1_x])
+                                srx[mask_1_x], self.rho_x[mask_1_x],self.D_x[mask_1_x])
         mask_2_x = mask & mask_rhox & ~mask_e
         ssx[mask_2_x] = self.ss_bilin(self.e[:,:,0:1][mask_2_x])
 
@@ -507,7 +524,7 @@ class ConstitutiveLaws():
         mask_e_y = e[:,:,1:2] > ecy
         mask_1_y = mask & mask_rhoy & mask_e_y
         ssy[mask_1_y] = self.ssr(self.e[:,:,1:2][mask_1_y], ecy[mask_1_y], self.ecsy, 
-                                sry[mask_1_y], self.rho_y[mask_1_y])
+                                sry[mask_1_y], self.rho_y[mask_1_y],self.D_y[mask_1_y])
         mask_2_y = mask & mask_rhoy & ~mask_e_y
         ssy[mask_2_y] = self.ss_bilin(self.e[:,:,1:2][mask_2_y])
 
@@ -551,12 +568,12 @@ class ConstitutiveLaws():
         ssx = np.zeros((e.shape[0], e.shape[1],1), dtype = np.complex64)
         mask_rhox = (self.rho_x != 0)
         ssx[mask&mask_rhox] = self.ssr(self.e[:,:,0:1][mask&mask_rhox], ecx[mask&mask_rhox], self.ecsx, 
-                                       srx[mask&mask_rhox], self.rho_x[mask&mask_rhox])
+                                       srx[mask&mask_rhox], self.rho_x[mask&mask_rhox],self.D_x[mask&mask_rhox])
 
         ssy = np.zeros((self.e.shape[0], self.e.shape[1],1), dtype = np.complex64)
         mask_rhoy = (self.rho_y != 0)
         ssy[mask&mask_rhoy] = self.ssr(self.e[:,:,1:2][mask&mask_rhoy], ecy[mask&mask_rhoy], self.ecsy, 
-                                       sry[mask&mask_rhoy], self.rho_y[mask&mask_rhoy])
+                                       sry[mask&mask_rhoy], self.rho_y[mask&mask_rhoy],self.D_y[mask&mask_rhoy])
 
         # 3 - CFRP contribution (skipeed)
 
