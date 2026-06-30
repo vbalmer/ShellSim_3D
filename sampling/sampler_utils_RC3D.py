@@ -699,21 +699,59 @@ def run_chunked_sampling(
 
 ########################################## Visualising strains, stresses ##########################################
 
-def plot_3D_data(save_data_path, filename, n_every: int = int(1e3)):
+def plot_3D_data(save_data_path, filename, regime_ids, data=None, plotname=None, n_every: int = int(1e3)):
+    
     """
-    visualise sampled strains
+    Visualise sampled strain or stress data in 3D scatter plots.
+
+    The function can either:
+    - read data from an `.h5` file, or
+    - use already provided data.
+
+    When `regime_ids` are given together with `data`, points are colored
+    according to the regime classification. Otherwise, all points are plotted in blue.
 
     Args:
-        save_data_path (str): location where to save the plot
-        filename (str): Either "scatter_eps_g" or "scatter_sig_g"     
+        save_data_path (str):
+            Path to the directory where `.h5` files are stored.
 
+        filename (str):
+            Name of the dataset inside the `.h5` file
+            (e.g. "eps_g", "sig_g").
+
+        regime_ids (np.ndarray or None):
+            Array of regime IDs (same length as data). Used for coloring.
+            Ignored if `data` is None.
+
+        data (np.ndarray, optional):
+            Preloaded data array of shape (N, 6).
+            If provided, file reading is skipped.
+
+        plotname (str, optional):
+            Name of the output plot file. If None, `filename` is used.
+
+        n_every (int, optional):
+            Subsampling factor when reading from file.
+            Only every n-th data point is used.
     """
+
     
+    if plotname is None:
+        plotname = filename
+
     
     fig = plt.figure(figsize=(14, 7))
     
+    
+    if data is None:
+        print("Reading data from file...")
+        data = read_h5_file(save_data_path, filename, n_every)
+        c = 'blue'
+    else:
+        print("Using provided data...")
+        c = regime_ids             # no subsampling needed
+
     t0 = time.perf_counter()
-    data = read_h5_file(save_data_path, filename, n_every)
     print(f'time reading file: {(time.perf_counter()-t0)/60:.2f}min')
 
     for i in range(2):
@@ -724,12 +762,39 @@ def plot_3D_data(save_data_path, filename, n_every: int = int(1e3)):
         print(f'Plotting {len(x)/1e6}*1e6/{len(x)/(1e6)*n_every}*1e6 points')
         
         ax = fig.add_subplot(1, 2, i + 1, projection='3d')
-        ax.scatter(x, y, z, s=2, alpha=0.1)
+        
+        # colorbar only if needed
+        if isinstance(c, str):
+            sc = ax.scatter(x, y, z, c=c, s=2, alpha=0.3)
+        else:
+            sc = ax.scatter(x, y, z, c=c, cmap='tab10', s=2, alpha=0.3)
+
+        # ax.scatter(x, y, z, s=2, alpha=0.1)
         figure_formatting(ax, i, filename)
         print(f'time plotting: {(time.perf_counter()-t1)/60:.2f}min')
+   
+    plt.subplots_adjust(
+        left=0.05,
+        right=0.9,    # space for colorbar
+        bottom=0.05,
+        top=0.95,
+        wspace=0.2
+    )
 
+    #plot colorbar only if needed
+    if not isinstance(c, str):
+        cbar = fig.colorbar(
+            sc,
+            ax=fig.axes,
+            fraction=0.025,   # thinner bar
+            pad=0.15          # small gap to plots
+        )
+        cbar.set_label("Regime ID")
+
+
+        
     t2 = time.perf_counter()
-    plt.tight_layout()
+    #plt.tight_layout()
     _plot_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plots")
     os.makedirs(_plot_dir, exist_ok=True)
     plt.savefig(os.path.join(_plot_dir, filename + ".png"))
@@ -740,7 +805,7 @@ def plot_3D_data(save_data_path, filename, n_every: int = int(1e3)):
 
 
 def read_h5_file(save_data_path, filename, n_every:int) -> tuple:
-    name = filename[-5:]
+    name = filename[-7:]
     with h5py.File(save_data_path, 'r') as f:
         data = f[name][::n_every,:]
 

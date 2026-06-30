@@ -74,6 +74,7 @@ class SigSimulator:
             mat_dict  (dict): material parameters (defined in main file)
         Returns:
             s       (np.arr): layer stresses (n_tot, 20, 3, 3), as complex array -> can use img part in d calculation.
+            e_princ:      [e1, e3, th] principal strains/direction in all layers
 
         """
         t0 = time.perf_counter()
@@ -82,23 +83,24 @@ class SigSimulator:
         if cm_klij == 3:
             # Reinforced Concrete Calculation
             s = np.zeros((e.shape[0], e.shape[1], 3, 3), dtype=np.complex64)
-
             e0 = e+np.array([0.0000000000000001j,0,0])
             material_law0 = ConstitutiveLaws(e0, self.constants, mat_dict, cm_klij=cm_klij)
-            s[:,:,0,:] = material_law0.out().squeeze(-1)
+            _, e_princ = material_law0.out()
+            e_princ=e_princ.squeeze(-1)
+            s[:,:,0,:]= material_law0.out()[0].squeeze(-1)
             t1 =(time.perf_counter()-t0)
             print(f'Calculated 1/3 instance of layer stresses s in {t1/60:.2f} min.')
 
 
             e1 = e+np.array([0,0.0000000000000001j,0])
             material_law1 = ConstitutiveLaws(e1, self.constants, mat_dict, cm_klij=cm_klij)
-            s[:,:,1,:] = material_law1.out().squeeze(-1)
+            s[:,:,1,:] = material_law1.out()[0].squeeze(-1)
             t2 =(time.perf_counter()-t0)
             print(f'Calculated 2/3 instance of layer stresses s in {t2/60:.2f} min.')
 
             e2 = e+np.array([0,0,0.0000000000000001j])
             material_law2 = ConstitutiveLaws(e2, self.constants, mat_dict, cm_klij=cm_klij)
-            s[:,:,2,:] = material_law2.out().squeeze(-1)
+            s[:,:,2,:] = material_law2.out()[0].squeeze(-1)
             t3 =(time.perf_counter()-t0)
             print(f'Calculated 3/3 instance of layer stresses s in {t3/60:.2f} min.')
 
@@ -112,12 +114,12 @@ class SigSimulator:
             # Linear Elastic calculation
             s = np.zeros((e.shape[0], e.shape[1], 3), dtype = np.float32)
             material_law0 = ConstitutiveLaws(e, self.constants, mat_dict, cm_klij=cm_klij)
-            s = material_law0.out().real
+            s = material_law0.out()[0].real
             t1 =(time.perf_counter()-t0)
             print(f'Calculated linear elastic layer stresses s in {t1/60:.2f} min.')
 
 
-        return s
+        return s, e_princ
 
 
     def find_sh_vec(self, s, cm_klij = 3, go = 1) -> np.array:
@@ -255,7 +257,9 @@ def sig_simulation_batchwise(eps_g, simulatesig:SigSimulator, cm, mat_dict, n_ba
     Returns:
         sig_g           (np.arr)        : Simulated sig (ntot, 6)
         dh              (np.arr)        : Simulated D   (ntot, 6,6)
-    
+        
+        e_princ:      [e1, e3, th] principal strains/direction in all layers
+   
     """
     sig_g = np_.zeros((eps_g.shape[0], 6))
     dh = np_.zeros((eps_g.shape[0],6,6))
@@ -265,16 +269,16 @@ def sig_simulation_batchwise(eps_g, simulatesig:SigSimulator, cm, mat_dict, n_ba
     for i in range(int(n_batches)):
         if i%10 != 0:
             with HiddenPrints():
-                sig_g, dh,_ = single_batch_execution(i, batch_size, simulatesig, mat_dict, cm, dh, sig_g, eps_g)
+                sig_g, dh,_,_,e_princ = single_batch_execution(i, batch_size, simulatesig, mat_dict, cm, dh, sig_g, eps_g)
 
         else:
-            sig_g, dh,t0 = single_batch_execution(i, batch_size, simulatesig, mat_dict, cm, dh, sig_g, eps_g)
+            sig_g, dh,t0,e,e_princ = single_batch_execution(i, batch_size, simulatesig, mat_dict, cm, dh, sig_g, eps_g)
             t_batch = time.perf_counter() - t0
             if i%10 == 0:
                 print(f'Finished batch {i+1}/{n_batches} with batchsize = {batch_size} in {t_batch/60:.2f} min.')
 
     print(f'Finished calculation of all {n_batches} batches in {(time.perf_counter()-t00)/60:.2f} min')
-    return sig_g, dh
+    return sig_g, dh, e, e_princ
 
 def single_batch_execution(i:int, batch_size: int, simulatesig:SigSimulator, mat_dict, cm, dh, sig_g, eps_g):
     t0 = time.perf_counter()
@@ -288,7 +292,7 @@ def single_batch_execution(i:int, batch_size: int, simulatesig:SigSimulator, mat
     e = simulatesig.find_e_vec(eps_g_batch)
 
     # 2.2 Find layer stresses
-    s = simulatesig.find_s_vec(e, mat_dict, cm_klij = cm)
+    s,  e_princ = simulatesig.find_s_vec(e, mat_dict, cm_klij = cm)
 
     # 2.3 Find generalised stresses
     sig_g_batch = simulatesig.find_sh_vec(s, cm_klij = cm)
@@ -299,7 +303,7 @@ def single_batch_execution(i:int, batch_size: int, simulatesig:SigSimulator, mat
     sig_g[start:end,:] = sig_g_batch.astype(sig_g.dtype)
     dh[start:end,:] = dh_batch.astype(dh.dtype)
 
-    return sig_g, dh, t0
+    return sig_g, dh, t0, e, e_princ
 
 def initialise_wandb(constants, mat_dict, logwandb):
     if logwandb: 

@@ -603,6 +603,7 @@ class ConstitutiveLaws():
             - do_cracked:   set to True also in previous file (as fixed parameter)
             --------------------------------------------- OUTPUT:-------------------------------------------------------
             - s:            [sx_klij,sy_klij,txy_klij] stress state in integration point
+            - e_princ:      [e1, e3, th] principal strains/direction in all layers
         -------------------------------------------------------------------------------------------------------------"""
 
         # 1 Assign Strain Values
@@ -612,9 +613,9 @@ class ConstitutiveLaws():
         ex = self.e[:,:,0:1]
         ey = self.e[:,:,1:2]
         gxy= self.e[:,:,2:3]
-
+        
         # 2 Calculate Stresses based on given constitutive model and strain state
-        e1, _, _, submodel,_,_,_,_ = self.principal(ex, ey, gxy)
+        e1, e3, th, submodel,_,_,_,_ = self.principal(ex, ey, gxy)
 
         if do_cracked == False:
             raise UserWarning('Not tested for do_cracked == False')
@@ -650,5 +651,7 @@ class ConstitutiveLaws():
         txy = np.where(mask, self.fff * self.rho_x * self.Esx / 2 * gxy, txy)
         
         s = np.stack((sx, sy, txy), axis = 2)
-
-        return s
+        e_princ =  np.stack((e1, e3, th), axis = 2)
+        e_princ = np.real(e_princ).astype(np.float32) #remove complex part from e_princ (-> see e0 in find_s_vec)
+        print("find_s_vec called")
+        return s, e_princ

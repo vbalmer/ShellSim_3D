@@ -62,21 +62,24 @@ else:
         eps_g = filter_3d_data(eps_g, constants = constants, prefilter = True)
 
     n_sub = max(1, constants['n_samples_3D'] // 1_000_000)
-    sig_g, dh = sig_simulation_batchwise(
+    sig_g, dh,e, e_princ = sig_simulation_batchwise(
         cp.asarray(eps_g), simulatesig, cm, mat_dict, n_batches=n_sub
     )
 
     eps_g_last, sig_g_last, D_last = eps_g, sig_g, dh
-
     if REMOVE_OUTLIERS:
         _, _, mask_outliers = find_outlier_d(D_last, eps_g_last, 100)
         eps_g_last = eps_g_last[~mask_outliers]
         sig_g_last = sig_g_last[~mask_outliers]
+        e = e[~mask_outliers]
+        e_princ=e_princ[~mask_outliers]
         D_last = D_last[~mask_outliers]
         print(f'Removed {np.sum(mask_outliers)} outliers from dataset ({np.sum(mask_outliers)/(D_last.shape[0])*100:.3f} %)')
-
+    
     save_3D_data(eps_g_last, save_data_dir, filename='eps_g')
     save_3D_data(sig_g_last, save_data_dir, filename='sig_g')
+    save_3D_data(e, save_data_dir, filename='e')
+    save_3D_data(e_princ, save_data_dir, filename='e_princ')
     if SAVE_D:
         save_3D_data(D_last, save_data_dir, filename='D')
 
